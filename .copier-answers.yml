@@ -1,0 +1,11 @@
+# Do not edit - changes here will be overwritten by Copier
+_commit: v1
+_src_path: gh:pydev-guide/pyrepo-copier
+author_email: brisvag@gmail.com
+author_name: Lorenzo Gaifas
+github_username: brisvag/qt-animation-editor
+mode: tooling
+module_name: qt_animation_editor
+project_name: qt-animation-editor
+project_short_description: Package description.
+
