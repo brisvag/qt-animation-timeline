@@ -790,6 +790,24 @@ class AnimationTimelineWidget(QWidget):
     # Wheel / keyboard                                                     #
     # ------------------------------------------------------------------ #
 
+    def _scroll_x_for_zoom(self, mouse_x: int, old_fw: float, new_fw: float) -> int:
+        """Compute the ``scroll_x`` that keeps the frame under *mouse_x* fixed.
+
+        Solves for *new_scroll_x* such that the exact frame position under the
+        mouse cursor maps to the same screen x coordinate after a zoom change
+        from *old_fw* to *new_fw* pixels-per-frame.
+        """
+        frame_at_mouse = (
+            mouse_x - self.left_margin - self.left_timeline_pad + self.scroll_x
+        ) / old_fw
+        new_scroll_x = int(
+            self.left_margin
+            + self.left_timeline_pad
+            + frame_at_mouse * new_fw
+            - mouse_x
+        )
+        return max(0, new_scroll_x)
+
     def wheelEvent(self, event: QWheelEvent) -> None:
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             steps = event.angleDelta().y() / 120
@@ -801,20 +819,8 @@ class AnimationTimelineWidget(QWidget):
             )
             if new_fw == old_fw:
                 return
-            # Keep the frame that is currently under the mouse cursor at the
-            # same screen x position after the zoom is applied.
-            mouse_x = event.x()
-            frame_at_mouse = (
-                mouse_x - self.left_margin - self.left_timeline_pad + self.scroll_x
-            ) / old_fw
-            new_scroll_x = int(
-                self.left_margin
-                + self.left_timeline_pad
-                + frame_at_mouse * new_fw
-                - mouse_x
-            )
             self.frame_width = new_fw
-            self.scroll_x = max(0, new_scroll_x)
+            self.scroll_x = self._scroll_x_for_zoom(event.x(), old_fw, new_fw)
             self.update_scrollbars()
             self.h_scroll.blockSignals(True)
             self.h_scroll.setValue(self.scroll_x)
@@ -879,7 +885,8 @@ class AnimationTimelineWidget(QWidget):
         timeline width.  Falls back to the default zoom when there are no
         keyframes or the widget has no width yet.
         """
-        max_frame = max((kf.t for t in self.tracks for kf in t.keyframes), default=100)
+        max_frame = max((kf.t for t in self.tracks for kf in t.keyframes), default=0)
+        # When there are no keyframes, buffer alone provides a small visible range.
         buffer = max(10, max_frame // 10)
         total_frames = max_frame + buffer
         available = self.width() - self.left_margin - self.left_timeline_pad
