@@ -19,8 +19,8 @@ from qtpy.QtGui import (
 )
 from qtpy.QtWidgets import QMenu, QScrollBar, QToolTip, QWidget
 
-from qt_animation_editor.easing import EasingFunction
-from qt_animation_editor.models import Keyframe, Track, _coerce_value
+from qt_animation_editor.easing import EasingFunction, _coerce_value
+from qt_animation_editor.models import Keyframe, Track
 
 # Special placeholder track name — always available and never unique-enforced.
 _PLACEHOLDER_TRACK = "..."
@@ -42,45 +42,60 @@ _DEFAULT_TRACK_COLORS = [
     QColor(204, 121, 167),  # reddish purple
 ]
 
+# Default values for all configurable colors.
+_DEFAULT_COLORS: dict[str, QColor] = {
+    "bg_color": QColor(30, 30, 30),
+    "track_bg_color": QColor(50, 50, 50),
+    "time_line_color": QColor(180, 180, 180, 120),
+    "time_label_color": QColor(200, 200, 200),
+    "current_frame_color": QColor(255, 0, 0),
+    "add_button_color": QColor(80, 150, 80),
+    "remove_button_color": QColor(180, 80, 80),
+    "rubber_band_fill": QColor(100, 150, 255, 50),
+    "rubber_band_border": QColor(100, 150, 255, 200),
+    "control_btn_color": QColor(60, 60, 80),
+    "control_btn_text_color": QColor(200, 200, 220),
+    "play_btn_color": QColor(60, 80, 60),
+    "play_btn_text_color": QColor(180, 220, 180),
+    "keyframe_selected_border_color": QColor(255, 255, 0),
+}
+
+# Play-mode constants.
+_PLAY_NORMAL = 0
+_PLAY_LOOP = 1
+_PLAY_PINGPONG = 2
+# Unicode glyphs for each play mode shown on the mode-toggle button.
+_PLAY_MODE_ICONS = {_PLAY_NORMAL: "▷", _PLAY_LOOP: "↺", _PLAY_PINGPONG: "⇄"}
+
 
 class AnimationTimelineWidget(QWidget):
     """Interactive animation timeline widget."""
 
-    # Emitted when the playhead moves to a new frame.
     playhead_moved = Signal(int)
-    # Emitted when a track is added or removed.
     track_added = Signal(object)
     track_removed = Signal(object)
-    # Emitted when a track's option/name is changed via the context menu.
     track_changed = Signal(object)
-    # Emitted when a keyframe is created by the user.
     keyframe_added = Signal(object, object)
-    # Emitted after one or more keyframes are deleted.
     keyframes_removed = Signal(list)
-    # Emitted at the end of a keyframe drag operation.
     keyframes_moved = Signal(list)
-    # Emitted when the easing of one or more keyframes changes.
     easing_changed = Signal(list)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        font_size: int = 10,
+        track_color_cycle: list[QColor] | None = None,
+        track_options: dict[str, tuple[Any, str]] | None = None,
+        **color_kwargs: QColor,
+    ) -> None:
         super().__init__(parent)
 
-        self.bg_color = QColor(30, 30, 30)
-        self.track_bg_color = QColor(50, 50, 50)
-        self.time_line_color = QColor(180, 180, 180, 120)
-        self.time_label_color = QColor(200, 200, 200)
-        self.current_frame_color = QColor(255, 0, 0)
-        self.add_button_color = QColor(80, 150, 80)
-        self.remove_button_color = QColor(180, 80, 80)
-        self.rubber_band_fill = QColor(100, 150, 255, 50)
-        self.rubber_band_border = QColor(100, 150, 255, 200)
-        self.control_btn_color = QColor(60, 60, 80)
-        self.control_btn_text_color = QColor(200, 200, 220)
-        self.play_btn_color = QColor(60, 80, 60)
-        self.play_btn_text_color = QColor(180, 220, 180)
+        for name, default in _DEFAULT_COLORS.items():
+            setattr(self, name, color_kwargs.get(name, default))
 
-        self.keyframe_size: int = 14
-        self.line_thickness: int = 3
+        self.keyframe_size: int = 16
+        self.line_thickness: int = 6
         self.frame_width: float = _DEFAULT_FRAME_WIDTH
         self.track_height: int = 28
         self.left_margin: int = 120
@@ -93,7 +108,9 @@ class AnimationTimelineWidget(QWidget):
         self.max_frame_width: float = 80.0
 
         # Colours cycled through when adding new tracks.  Replace to customise.
-        self.track_colors: list[QColor] = list(_DEFAULT_TRACK_COLORS)
+        self.track_color_cycle: list[QColor] = (
+            list(track_color_cycle) if track_color_cycle is not None else list(_DEFAULT_TRACK_COLORS)
+        )
 
         # Easing options shown in the right-click menu.  Replace to restrict choices.
         self.easing_options: list[EasingFunction] = list(EasingFunction)
@@ -105,7 +122,9 @@ class AnimationTimelineWidget(QWidget):
         # When a keyframe is created the current field value is used as its value.
         # The "..." placeholder track is always available and needs no binding.
         # Example: ``{"x": (my_object, "x"), "y": (my_object, "y")}``
-        self.track_options: dict[str, tuple[Any, str]] = {}
+        self.track_options: dict[str, tuple[Any, str]] = (
+            dict(track_options) if track_options is not None else {}
+        )
 
         self.current_frame: int = 0
 
@@ -127,6 +146,8 @@ class AnimationTimelineWidget(QWidget):
         # Playback state.
         self._playing: bool = False
         self._play_fps: int = 30
+        self._play_mode: int = _PLAY_NORMAL
+        self._play_direction: int = 1
         self._play_timer = QTimer(self)
         self._play_timer.timeout.connect(self._advance_playhead)
 
@@ -135,17 +156,15 @@ class AnimationTimelineWidget(QWidget):
         self.h_scroll.valueChanged.connect(self._on_hscroll)
         self.v_scroll.valueChanged.connect(self._on_vscroll)
 
-        self.label_font = QFont("Arial", 10)
-        # Larger font used exclusively for the ⌂ / ▶ / ⏸ control-button glyphs.
-        self.control_font = QFont("Arial", 18)
+        self.font_size: int = font_size
+        self.label_font = QFont("Arial", font_size)
+        # Larger fonts for the control-button glyphs; home gets an extra boost.
+        self.home_font = QFont("Arial", font_size * 3)
+        self.control_font = QFont("Arial", font_size * 2)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         # Enable hover events for keyframe value tooltips.
         self.setMouseTracking(True)
-
-    # ------------------------------------------------------------------ #
-    # Coordinate helpers                                                   #
-    # ------------------------------------------------------------------ #
 
     def frame_to_x(self, frame: int | float) -> float:
         """Convert a frame number to a pixel x coordinate."""
@@ -209,10 +228,6 @@ class AnimationTimelineWidget(QWidget):
         self.scroll_y = v
         self.update()
 
-    # ------------------------------------------------------------------ #
-    # Zoom                                                                 #
-    # ------------------------------------------------------------------ #
-
     def zoom_step(self) -> int:
         """Return the frame-label interval appropriate for the current zoom level.
 
@@ -235,10 +250,6 @@ class AnimationTimelineWidget(QWidget):
         else:
             step = magnitude
         return max(1, int(step))
-
-    # ------------------------------------------------------------------ #
-    # Painting                                                             #
-    # ------------------------------------------------------------------ #
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -362,26 +373,35 @@ class AnimationTimelineWidget(QWidget):
         painter.drawLine(cx, cy - 8, cx, cy + 8)
 
     def _draw_control_buttons(self, painter: QPainter, metrics: QFontMetrics) -> None:
-        """Draw the reset-view and play/pause buttons in the top-left corner."""
-        btn_w = self.left_margin // 2
+        """Draw the home, play-mode, and play/pause buttons in the top-left corner."""
+        btn_w = self.left_margin // 3
         h = self.top_margin
 
-        painter.setFont(self.control_font)
-
-        # Reset / home button (left half).
+        # Home / reset-view button (left third).
         painter.fillRect(0, 0, btn_w, h, self.control_btn_color)
         painter.setPen(self.control_btn_text_color)
+        painter.setFont(self.home_font)
         painter.drawText(
             QRect(0, 0, btn_w, h),
             Qt.AlignmentFlag.AlignCenter,
             "\u2302",  # ⌂ house symbol
         )
 
-        # Play / pause button (right half).
-        painter.fillRect(btn_w, 0, btn_w, h, self.play_btn_color)
-        painter.setPen(self.play_btn_text_color)
+        # Play-mode toggle button (middle third).
+        painter.fillRect(btn_w, 0, btn_w, h, self.control_btn_color)
+        painter.setPen(self.control_btn_text_color)
+        painter.setFont(self.control_font)
         painter.drawText(
             QRect(btn_w, 0, btn_w, h),
+            Qt.AlignmentFlag.AlignCenter,
+            _PLAY_MODE_ICONS[self._play_mode],
+        )
+
+        # Play / pause button (right third).
+        painter.fillRect(2 * btn_w, 0, btn_w, h, self.play_btn_color)
+        painter.setPen(self.play_btn_text_color)
+        painter.drawText(
+            QRect(2 * btn_w, 0, btn_w, h),
             Qt.AlignmentFlag.AlignCenter,
             "\u23f8" if self._playing else "\u25b6",  # ⏸ / ▶
         )
@@ -418,11 +438,12 @@ class AnimationTimelineWidget(QWidget):
         """Draw a single keyframe as a filled diamond."""
         x = self.frame_to_x(kf.t)
         y = self.track_center_y(track_index)
-        color = (
-            track.color if kf not in self.selected_keyframes else QColor(255, 255, 0)
-        )
-        painter.setBrush(color)
-        painter.setPen(Qt.PenStyle.NoPen)
+        selected = kf in self.selected_keyframes
+        painter.setBrush(track.color)
+        if selected:
+            painter.setPen(QPen(self.keyframe_selected_border_color, 2))
+        else:
+            painter.setPen(Qt.PenStyle.NoPen)
         s = self.keyframe_size / 2
         pts = [
             QPoint(int(x), int(y - s)),
@@ -431,10 +452,6 @@ class AnimationTimelineWidget(QWidget):
             QPoint(int(x - s), int(y)),
         ]
         painter.drawPolygon(pts)
-
-    # ------------------------------------------------------------------ #
-    # Mouse events                                                         #
-    # ------------------------------------------------------------------ #
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
@@ -472,10 +489,12 @@ class AnimationTimelineWidget(QWidget):
         self.update()
 
     def _handle_control_click(self, x: int, _y: int) -> None:
-        """Handle a click in the top-left control area (reset / play)."""
-        btn_w = self.left_margin // 2
+        """Handle a click in the top-left control area (home / play-mode / play)."""
+        btn_w = self.left_margin // 3
         if x < btn_w:
             self._reset_view()
+        elif x < 2 * btn_w:
+            self._cycle_play_mode()
         else:
             self._toggle_playback()
 
@@ -636,10 +655,6 @@ class AnimationTimelineWidget(QWidget):
                 return kf
         return None
 
-    # ------------------------------------------------------------------ #
-    # Context menus                                                        #
-    # ------------------------------------------------------------------ #
-
     def contextMenuEvent(self, event) -> None:
         x, y = event.pos().x(), event.pos().y()
         # Ignore right-clicks in the ruler/control strip.
@@ -786,10 +801,6 @@ class AnimationTimelineWidget(QWidget):
             action.triggered.connect(_change)
         menu.exec(global_pos)
 
-    # ------------------------------------------------------------------ #
-    # Wheel / keyboard                                                     #
-    # ------------------------------------------------------------------ #
-
     def _scroll_x_for_zoom(self, mouse_x: int, old_fw: float, new_fw: float) -> int:
         """Compute the ``scroll_x`` that keeps the frame under *mouse_x* fixed.
 
@@ -847,10 +858,10 @@ class AnimationTimelineWidget(QWidget):
                 self.keyframes_removed.emit(removed)
         elif event.key() == Qt.Key.Key_Space:
             self._toggle_playback()
-
-    # ------------------------------------------------------------------ #
-    # Playback                                                             #
-    # ------------------------------------------------------------------ #
+        elif event.key() == Qt.Key.Key_Left:
+            self._set_playhead(max(0, self.current_frame - 1))
+        elif event.key() == Qt.Key.Key_Right:
+            self._set_playhead(self.current_frame + 1)
 
     def _toggle_playback(self) -> None:
         """Start or stop playback."""
@@ -869,13 +880,37 @@ class AnimationTimelineWidget(QWidget):
         self._play_timer.stop()
         self.update()
 
-    def _advance_playhead(self) -> None:
-        """Advance by one frame; stop if there are no keyframes to play through."""
-        self._set_playhead(self.current_frame + 1)
+    def _cycle_play_mode(self) -> None:
+        """Cycle through normal → loop → pingpong → normal play modes."""
+        self._play_mode = (self._play_mode + 1) % 3
+        self._play_direction = 1
+        self.update()
 
-    # ------------------------------------------------------------------ #
-    # Reset view                                                           #
-    # ------------------------------------------------------------------ #
+    def _advance_playhead(self) -> None:
+        """Advance by one frame according to the current play mode.
+
+        Normal: stop at the last keyframe.
+        Loop: wrap back to frame 0 after the last keyframe.
+        Pingpong: reverse direction at each end.
+        """
+        max_frame = max((kf.t for t in self.tracks for kf in t.keyframes), default=0)
+        next_frame = self.current_frame + self._play_direction
+        if self._play_mode == _PLAY_NORMAL:
+            if next_frame > max_frame:
+                self._stop_playback()
+                self._set_playhead(max_frame)
+                return
+        elif self._play_mode == _PLAY_LOOP:
+            if next_frame > max_frame:
+                next_frame = 0
+        elif self._play_mode == _PLAY_PINGPONG:
+            if next_frame > max_frame:
+                self._play_direction = -1
+                next_frame = max(0, max_frame - 1)
+            elif next_frame < 0:
+                self._play_direction = 1
+                next_frame = min(1, max_frame)
+        self._set_playhead(next_frame)
 
     def _reset_view(self) -> None:
         """Fit the entire keyframe range in the viewport and scroll to the origin.
@@ -904,10 +939,6 @@ class AnimationTimelineWidget(QWidget):
         self.v_scroll.setValue(0)
         self.update_scrollbars()
         self.update()
-
-    # ------------------------------------------------------------------ #
-    # Playhead & interpolation                                             #
-    # ------------------------------------------------------------------ #
 
     def _set_playhead(self, frame: int) -> None:
         """Move the playhead to *frame*, dispatch callbacks, emit ``playhead_moved``."""
@@ -955,10 +986,6 @@ class AnimationTimelineWidget(QWidget):
                 return k1.easing(p, k1.value, k2.value)
         return kfs[-1].value  # unreachable, but keeps type-checker happy
 
-    # ------------------------------------------------------------------ #
-    # Track management                                                     #
-    # ------------------------------------------------------------------ #
-
     def _can_add_track(self) -> bool:
         """Return ``True`` if there is at least one unused track option.
 
@@ -976,8 +1003,8 @@ class AnimationTimelineWidget(QWidget):
         When *name* is ``None`` the track is created as the ``"..."``
         placeholder, which can later be changed via the context menu.
         """
-        if self.track_colors:
-            color = self.track_colors[len(self.tracks) % len(self.track_colors)]
+        if self.track_color_cycle:
+            color = self.track_color_cycle[len(self.tracks) % len(self.track_color_cycle)]
         else:
             color = QColor(180, 180, 180)
         track = Track(name if name is not None else _PLACEHOLDER_TRACK, color)

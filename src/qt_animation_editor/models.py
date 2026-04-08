@@ -1,4 +1,4 @@
-"""Core data models: Keyframe, Track, and value-coercion helpers."""
+"""Core data models: Keyframe and Track."""
 
 from __future__ import annotations
 
@@ -7,26 +7,6 @@ from typing import Any
 from qtpy.QtGui import QColor
 
 from qt_animation_editor.easing import EasingFunction
-
-
-def _coerce_value(reference: Any, interpolated: Any) -> Any:
-    """Coerce *interpolated* to match the type of *reference* for scalar types.
-
-    Handles Python ``bool``, ``int``, and ``float`` precisely.  Array-like
-    values (e.g. numpy arrays) are returned as-is because element-wise
-    arithmetic already produces the correct type.  Non-numeric types (e.g.
-    strings, arbitrary objects) are also returned unchanged — they arise only
-    from the ``Step`` easing which returns the original value directly.
-    """
-    # bool must be checked before int — bool is a subclass of int.
-    if isinstance(reference, bool):
-        return bool(round(float(interpolated)))
-    if isinstance(reference, int):
-        return round(float(interpolated))
-    if isinstance(reference, float):
-        return float(interpolated)
-    # numpy arrays and other array-like / arbitrary types.
-    return interpolated
 
 
 class Keyframe:

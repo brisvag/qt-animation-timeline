@@ -9,11 +9,9 @@ except PackageNotFoundError:
 __author__ = "Lorenzo Gaifas"
 __email__ = "brisvag@gmail.com"
 
-# Re-export the public API so callers can do:
-#   from qt_animation_editor import AnimationTimelineWidget, EasingFunction, …
-from qt_animation_editor.easing import EasingFunction
+from qt_animation_editor.easing import EasingFunction, _coerce_value
 from qt_animation_editor.editor import _PLACEHOLDER_TRACK, AnimationTimelineWidget
-from qt_animation_editor.models import Keyframe, Track, _coerce_value
+from qt_animation_editor.models import Keyframe, Track
 
 __all__ = [
     "_PLACEHOLDER_TRACK",

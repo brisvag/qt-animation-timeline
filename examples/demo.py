@@ -31,19 +31,18 @@ class Scene:
         self.angles: np.ndarray = np.array([0.0, 0.0, 0.0])
 
 
-def main() -> None:
-    """Run the demo application."""
-    app = QApplication(sys.argv)
-
+def build_demo() -> tuple[QWidget, AnimationTimelineWidget, Scene]:
+    """Build and return the demo widget without starting the event loop."""
     scene = Scene()
 
-    timeline = AnimationTimelineWidget()
-    timeline.track_options = {
-        "x": (scene, "x"),
-        "y": (scene, "y"),
-        "visible": (scene, "visible"),
-        "angles": (scene, "angles"),
-    }
+    timeline = AnimationTimelineWidget(
+        track_options={
+            "x": (scene, "x"),
+            "y": (scene, "y"),
+            "visible": (scene, "visible"),
+            "angles": (scene, "angles"),
+        }
+    )
 
     # Add tracks pre-bound to the model fields.
     timeline.add_track("x")
@@ -95,6 +94,13 @@ def main() -> None:
     main_widget.setWindowTitle("AnimationTimelineWidget - demo")
     main_widget.show()
 
+    return main_widget, timeline, scene
+
+
+def main() -> None:
+    """Run the demo application."""
+    app = QApplication(sys.argv)
+    _widget, _timeline, _scene = build_demo()
     sys.exit(app.exec())
 
 
