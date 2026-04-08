@@ -15,7 +15,8 @@ import sys
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
-from qt_animation_editor.editor import AnimationTimelineWidget, EasingFunction
+from qt_animation_editor.easing import EasingFunction
+from qt_animation_editor.editor import AnimationTimelineWidget
 
 
 class Scene:
@@ -52,10 +53,10 @@ def main() -> None:
     timeline.tracks[0].add_keyframe(200, value=50.0)
 
     timeline.tracks[1].add_keyframe(0, value=0.0)
-    timeline.tracks[1].add_keyframe(150, value=100.0, easing=EasingFunction.Bool)
+    timeline.tracks[1].add_keyframe(150, value=100.0, easing=EasingFunction.Step)
     timeline.tracks[1].add_keyframe(300, value=0.0)
 
-    timeline.tracks[2].add_keyframe(0, value=1.0, easing=EasingFunction.Bool)
+    timeline.tracks[2].add_keyframe(0, value=1.0, easing=EasingFunction.Step)
     timeline.tracks[2].add_keyframe(120, value=0.0)
     timeline.tracks[2].add_keyframe(240, value=1.0)
 

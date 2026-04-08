@@ -8,14 +8,12 @@ from qtpy.QtWidgets import QApplication
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import qt_animation_editor
+from qt_animation_editor.easing import EasingFunction
 from qt_animation_editor.editor import (
     _PLACEHOLDER_TRACK,
     AnimationTimelineWidget,
-    EasingFunction,
-    Keyframe,
-    Track,
-    _coerce_value,
 )
+from qt_animation_editor.models import Keyframe, Track, _coerce_value
 
 
 @pytest.fixture(scope="session")
@@ -34,18 +32,28 @@ def test_imports_with_version():
 
 class TestEasingFunction:
     def test_linear_midpoint(self):
-        assert EasingFunction.Linear(0.5) == pytest.approx(0.5)
+        assert EasingFunction.Linear(0.5, 0.0, 1.0) == pytest.approx(0.5)
 
     def test_linear_bounds(self):
-        assert EasingFunction.Linear(0.0) == pytest.approx(0.0)
-        assert EasingFunction.Linear(1.0) == pytest.approx(1.0)
+        assert EasingFunction.Linear(0.0, 0.0, 1.0) == pytest.approx(0.0)
+        assert EasingFunction.Linear(1.0, 0.0, 1.0) == pytest.approx(1.0)
 
-    def test_bool_before_end(self):
-        assert EasingFunction.Bool(0.0) == pytest.approx(0.0)
-        assert EasingFunction.Bool(0.999) == pytest.approx(0.0)
+    def test_linear_with_range(self):
+        # Interpolation should scale with the provided range.
+        assert EasingFunction.Linear(0.5, 10.0, 20.0) == pytest.approx(15.0)
 
-    def test_bool_at_end(self):
-        assert EasingFunction.Bool(1.0) == pytest.approx(1.0)
+    def test_step_before_midpoint(self):
+        assert EasingFunction.Step(0.0, 0.0, 1.0) == pytest.approx(0.0)
+        assert EasingFunction.Step(0.49, 0.0, 1.0) == pytest.approx(0.0)
+
+    def test_step_at_and_after_midpoint(self):
+        assert EasingFunction.Step(0.5, 0.0, 1.0) == pytest.approx(1.0)
+        assert EasingFunction.Step(1.0, 0.0, 1.0) == pytest.approx(1.0)
+
+    def test_step_works_with_non_numeric(self):
+        """Step must work for arbitrary types — no arithmetic involved."""
+        assert EasingFunction.Step(0.3, "a", "b") == "a"
+        assert EasingFunction.Step(0.5, "a", "b") == "b"
 
     def test_members_are_callable(self):
         for ef in EasingFunction:
@@ -73,7 +81,6 @@ class TestCoerceValue:
 
     def test_bool_not_treated_as_int(self):
         # bool is a subclass of int; ensure we get a proper bool back.
-        # Different input than test_bool_rounds to exercise the boundary.
         result = _coerce_value(False, 1.0)
         assert type(result) is bool
         assert result is True
@@ -96,8 +103,8 @@ class TestKeyframe:
         assert Keyframe(10).easing is EasingFunction.Linear
 
     def test_custom_easing(self):
-        kf = Keyframe(5, easing=EasingFunction.Bool)
-        assert kf.easing is EasingFunction.Bool
+        kf = Keyframe(5, easing=EasingFunction.Step)
+        assert kf.easing is EasingFunction.Step
 
 
 # ---------------------------------------------------------------------------
@@ -176,8 +183,8 @@ class TestAnimationTimelineWidget:
 
     def test_easing_options_are_settable(self, qapp):
         w = AnimationTimelineWidget()
-        w.easing_options = [EasingFunction.Bool]
-        assert w.easing_options == [EasingFunction.Bool]
+        w.easing_options = [EasingFunction.Step]
+        assert w.easing_options == [EasingFunction.Step]
 
     def test_set_playhead_emits_signal(self, qapp):
         w = AnimationTimelineWidget()
@@ -430,11 +437,15 @@ class TestInterpolation:
         w.tracks[0].add_keyframe(100, value=5.0)
         assert w._interpolate_track(w.tracks[0], 200) == pytest.approx(5.0)
 
-    def test_bool_easing_holds_then_jumps(self, qapp):
+    def test_step_easing_switches_at_midpoint(self, qapp):
+        """Step easing should hold v_start until p=0.5, then switch to v_end."""
         w = self._make_widget(qapp)
-        w.tracks[0].add_keyframe(0, value=0.0, easing=EasingFunction.Bool)
+        w.tracks[0].add_keyframe(0, value=0.0, easing=EasingFunction.Step)
         w.tracks[0].add_keyframe(100, value=1.0)
-        assert w._interpolate_track(w.tracks[0], 50) == pytest.approx(0.0)
+        # Just before midpoint → still 0
+        assert w._interpolate_track(w.tracks[0], 49) == pytest.approx(0.0)
+        # At midpoint → switches to 1
+        assert w._interpolate_track(w.tracks[0], 50) == pytest.approx(1.0)
         assert w._interpolate_track(w.tracks[0], 100) == pytest.approx(1.0)
 
     def test_zero_span_segment_returns_first_value(self, qapp):
@@ -518,7 +529,7 @@ class TestTrackModelDispatch:
         assert isinstance(m.n, int)
         assert m.n == 3
 
-    def test_bool_field_coerced(self, qapp):
+    def test_step_field_coerced(self, qapp):
         class Model:
             flag = False
 
@@ -526,11 +537,14 @@ class TestTrackModelDispatch:
         w = AnimationTimelineWidget()
         w.track_options = {"A": (m, "flag")}
         w.add_track("A")
-        w.tracks[0].add_keyframe(0, value=0.0, easing=EasingFunction.Bool)
+        w.tracks[0].add_keyframe(0, value=0.0, easing=EasingFunction.Step)
         w.tracks[0].add_keyframe(100, value=1.0)
 
+        w._set_playhead(49)
+        assert m.flag is False  # Step holds until p=0.5
+
         w._set_playhead(50)
-        assert m.flag is False  # Bool easing holds until p=1
+        assert m.flag is True  # Step switches at p=0.5
 
     def test_no_update_for_unregistered_track(self, qapp):
         class Model:
@@ -545,6 +559,48 @@ class TestTrackModelDispatch:
 
         w._set_playhead(50)
         assert m.x == 0.0  # untouched
+
+    def test_dispatch_on_easing_change(self, qapp):
+        """Changing a keyframe's easing must immediately update bound model fields."""
+
+        class Model:
+            x = 0.0
+
+        m = Model()
+        w = AnimationTimelineWidget()
+        w.track_options = {"A": (m, "x")}
+        w.add_track("A")
+        w.tracks[0].add_keyframe(0, value=0.0)
+        w.tracks[0].add_keyframe(100, value=10.0)
+        w._set_playhead(50)
+        assert m.x == pytest.approx(5.0)  # linear midpoint
+
+        # Switch to Step: at p=0.5 the value jumps to v_end.
+        kf_left = w.tracks[0].keyframes[0]
+        kf_left.easing = EasingFunction.Step
+        w._dispatch_track_callbacks(w.current_frame)
+        assert m.x == pytest.approx(10.0)
+
+    def test_dispatch_on_keyframe_add(self, qapp):
+        """Adding a keyframe must immediately refresh the bound model field."""
+
+        class Model:
+            x = 0.0
+
+        m = Model()
+        w = AnimationTimelineWidget()
+        w.track_options = {"A": (m, "x")}
+        w.add_track("A")
+        w.tracks[0].add_keyframe(0, value=0.0)
+        w.tracks[0].add_keyframe(100, value=10.0)
+        w._set_playhead(50)
+        assert m.x == pytest.approx(5.0)
+
+        # Insert a new keyframe at frame 50 with a different value.
+        w.tracks[0].add_keyframe(50, value=99.0)
+        w._dispatch_track_callbacks(w.current_frame)
+        # Now frame 50 is exactly at a keyframe → returns its value.
+        assert m.x == pytest.approx(99.0)
 
 
 # ---------------------------------------------------------------------------
@@ -581,3 +637,130 @@ class TestKeyframeValueCapture:
         # No binding for placeholder → initial value should default to 0.
         initial_value = getattr(*binding) if binding else 0
         assert initial_value == 0
+
+
+# ---------------------------------------------------------------------------
+# _can_add_track
+# ---------------------------------------------------------------------------
+
+
+class TestCanAddTrack:
+    def test_no_options_always_can_add(self, qapp):
+        w = AnimationTimelineWidget()
+        assert w._can_add_track() is True
+
+    def test_options_not_all_used(self, qapp):
+        w = AnimationTimelineWidget()
+        w.track_options = {"A": (object(), "x"), "B": (object(), "y")}
+        w.add_track("A")
+        assert w._can_add_track() is True  # B still free
+
+    def test_all_options_used_blocks_add(self, qapp):
+        w = AnimationTimelineWidget()
+        w.track_options = {"A": (object(), "x")}
+        w.add_track("A")
+        assert w._can_add_track() is False
+
+    def test_placeholder_tracks_dont_count(self, qapp):
+        w = AnimationTimelineWidget()
+        w.track_options = {"A": (object(), "x")}
+        w.add_track("A")
+        w.add_track()  # placeholder doesn't consume an option slot
+        assert w._can_add_track() is False  # still blocked (A is used)
+
+
+# ---------------------------------------------------------------------------
+# zoom_step magnitude
+# ---------------------------------------------------------------------------
+
+
+class TestZoomStep:
+    def test_normal_zoom(self, qapp):
+        w = AnimationTimelineWidget()
+        w.frame_width = 15.0
+        step = w.zoom_step()
+        assert step >= 1
+
+    def test_very_zoomed_out(self, qapp):
+        w = AnimationTimelineWidget()
+        w.frame_width = 0.1  # 1000 frames per 100 px
+        step = w.zoom_step()
+        assert step >= 100  # should pick a large round step
+
+    def test_very_zoomed_in(self, qapp):
+        w = AnimationTimelineWidget()
+        w.frame_width = 60.0  # fewer than 2 frames per 100 px
+        step = w.zoom_step()
+        assert step == 1
+
+    def test_step_is_power_of_ten_family(self, qapp):
+        """Step must always be 1, 2, or 5 times a power of ten."""
+        for fw in [0.05, 0.2, 1, 5, 15, 50]:
+            w = AnimationTimelineWidget()
+            w.frame_width = fw
+            step = w.zoom_step()
+            # Check it divides cleanly into a power-of-10 family.
+            assert step >= 1
+            s = step
+            while s > 9:
+                s //= 10
+            assert s in (1, 2, 5)
+
+
+# ---------------------------------------------------------------------------
+# Easing preselection by type
+# ---------------------------------------------------------------------------
+
+
+class TestEasingPreselection:
+    def test_bool_field_gets_only_step(self, qapp):
+        class Model:
+            flag: bool = True
+
+        m = Model()
+        w = AnimationTimelineWidget()
+        w.track_options = {"A": (m, "flag")}
+        t = w.add_track("A")
+        allowed = w._get_allowed_easings_for_track(t)
+        assert allowed == [EasingFunction.Step]
+
+    def test_float_field_gets_all(self, qapp):
+        class Model:
+            x: float = 0.0
+
+        m = Model()
+        w = AnimationTimelineWidget()
+        w.track_options = {"A": (m, "x")}
+        t = w.add_track("A")
+        allowed = w._get_allowed_easings_for_track(t)
+        assert EasingFunction.Linear in allowed
+        assert EasingFunction.Step in allowed
+
+    def test_placeholder_gets_all(self, qapp):
+        w = AnimationTimelineWidget()
+        t = w.add_track()  # "..."
+        allowed = w._get_allowed_easings_for_track(t)
+        assert set(allowed) == set(EasingFunction)
+
+
+# ---------------------------------------------------------------------------
+# Double-right-click does not create a keyframe
+# ---------------------------------------------------------------------------
+
+
+class TestDoubleClickButton:
+    def test_right_double_click_ignored(self, qapp):
+        w = AnimationTimelineWidget()
+        w.resize(800, 300)
+        w.add_track("A")
+        x = int(w.frame_to_x(50))
+        y = int(w.track_center_y(0))
+        event = QMouseEvent(
+            QEvent.Type.MouseButtonDblClick,
+            QPoint(x, y),
+            Qt.MouseButton.RightButton,
+            Qt.MouseButton.RightButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        w.mouseDoubleClickEvent(event)
+        assert len(w.tracks[0].keyframes) == 0  # no keyframe created
