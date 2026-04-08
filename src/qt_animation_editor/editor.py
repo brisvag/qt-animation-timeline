@@ -55,6 +55,8 @@ _DEFAULT_COLORS: dict[str, QColor] = {
     "rubber_band_border": QColor(100, 150, 255, 200),
     "control_btn_color": QColor(60, 60, 80),
     "control_btn_text_color": QColor(200, 200, 220),
+    "loop_btn_color": QColor(60, 80, 100),
+    "loop_btn_text_color": QColor(180, 210, 230),
     "play_btn_color": QColor(60, 80, 60),
     "play_btn_text_color": QColor(180, 220, 180),
     "keyframe_selected_border_color": QColor(255, 255, 0),
@@ -65,7 +67,7 @@ _PLAY_NORMAL = 0
 _PLAY_LOOP = 1
 _PLAY_PINGPONG = 2
 # Unicode glyphs for each play mode shown on the mode-toggle button.
-_PLAY_MODE_ICONS = {_PLAY_NORMAL: "▷", _PLAY_LOOP: "↺", _PLAY_PINGPONG: "⇄"}
+_PLAY_MODE_ICONS = {_PLAY_NORMAL: "→", _PLAY_LOOP: "↺", _PLAY_PINGPONG: "⇄"}
 
 
 class AnimationTimelineWidget(QWidget):
@@ -87,6 +89,7 @@ class AnimationTimelineWidget(QWidget):
         font_size: int = 10,
         track_color_cycle: list[QColor] | None = None,
         track_options: dict[str, tuple[Any, str]] | None = None,
+        playback_speed: float = 1.0,
         **color_kwargs: QColor,
     ) -> None:
         super().__init__(parent)
@@ -146,6 +149,7 @@ class AnimationTimelineWidget(QWidget):
         # Playback state.
         self._playing: bool = False
         self._play_fps: int = 30
+        self.playback_speed: float = playback_speed
         self._play_mode: int = _PLAY_NORMAL
         self._play_direction: int = 1
         self._play_timer = QTimer(self)
@@ -387,9 +391,9 @@ class AnimationTimelineWidget(QWidget):
             "\u2302",  # ⌂ house symbol
         )
 
-        # Play-mode toggle button (middle third).
-        painter.fillRect(btn_w, 0, btn_w, h, self.control_btn_color)
-        painter.setPen(self.control_btn_text_color)
+        # Play-mode toggle button (middle third) — distinct color from neighbours.
+        painter.fillRect(btn_w, 0, btn_w, h, self.loop_btn_color)
+        painter.setPen(self.loop_btn_text_color)
         painter.setFont(self.control_font)
         painter.drawText(
             QRect(btn_w, 0, btn_w, h),
@@ -400,6 +404,7 @@ class AnimationTimelineWidget(QWidget):
         # Play / pause button (right third).
         painter.fillRect(2 * btn_w, 0, btn_w, h, self.play_btn_color)
         painter.setPen(self.play_btn_text_color)
+        painter.setFont(self.control_font)
         painter.drawText(
             QRect(2 * btn_w, 0, btn_w, h),
             Qt.AlignmentFlag.AlignCenter,
@@ -872,7 +877,8 @@ class AnimationTimelineWidget(QWidget):
 
     def _start_playback(self) -> None:
         self._playing = True
-        self._play_timer.start(max(1, 1000 // self._play_fps))
+        interval = max(1, int(1000 / (self._play_fps * self.playback_speed)))
+        self._play_timer.start(interval)
         self.update()
 
     def _stop_playback(self) -> None:
