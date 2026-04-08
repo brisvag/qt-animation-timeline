@@ -6,7 +6,7 @@ from typing import Any
 
 from qtpy.QtGui import QColor
 
-from qt_animation_editor.easing import EasingFunction
+from qt_animation_timeline.easing import EasingFunction
 
 
 class Keyframe:

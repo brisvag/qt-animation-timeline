@@ -8,9 +8,9 @@ from qtpy.QtWidgets import QApplication
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import qt_animation_editor
-from qt_animation_editor.easing import EasingFunction, _coerce_value
-from qt_animation_editor.editor import (
+import qt_animation_timeline
+from qt_animation_timeline.easing import EasingFunction, _coerce_value
+from qt_animation_timeline.editor import (
     _BUTTON_ICONS,
     _DEFAULT_COLORS,
     _PLACEHOLDER_TRACK,
@@ -20,7 +20,7 @@ from qt_animation_editor.editor import (
     _PLAY_PINGPONG,
     AnimationTimelineWidget,
 )
-from qt_animation_editor.models import Keyframe, Track
+from qt_animation_timeline.models import Keyframe, Track
 
 
 @pytest.fixture(scope="session")
@@ -29,7 +29,7 @@ def qapp():
 
 
 def test_imports_with_version():
-    assert isinstance(qt_animation_editor.__version__, str)
+    assert isinstance(qt_animation_timeline.__version__, str)
 
 
 def test_easing_linear(qapp):
@@ -542,7 +542,7 @@ def test_reset_view(qapp):
 
 
 def test_default_colors(qapp):
-    from qt_animation_editor.editor import _DEFAULT_TRACK_COLORS
+    from qt_animation_timeline.editor import _DEFAULT_TRACK_COLORS
 
     assert len(_DEFAULT_TRACK_COLORS) == 7
     for c in _DEFAULT_TRACK_COLORS:

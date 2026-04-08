@@ -21,8 +21,8 @@ from qtpy.QtSvg import QSvgRenderer
 from qtpy.QtWidgets import QMenu, QScrollBar, QToolTip, QVBoxLayout, QWidget
 from superqt import QSearchableComboBox
 
-from qt_animation_editor.easing import EasingFunction, _coerce_value
-from qt_animation_editor.models import Keyframe, Track
+from qt_animation_timeline.easing import EasingFunction, _coerce_value
+from qt_animation_timeline.models import Keyframe, Track
 
 # Special placeholder track name — always available and never unique-enforced.
 _PLACEHOLDER_TRACK = "..."
@@ -146,7 +146,9 @@ class AnimationTimelineWidget(QWidget):
         self.line_thickness: int = 6
         self.frame_width: float = _DEFAULT_FRAME_WIDTH
         self.track_height: int = 28
-        self.left_margin: int = 120
+        # Left margin is auto-computed from label widths; 80 is the minimum.
+        self._left_margin_min: int = 80
+        self.left_margin: int = self._left_margin_min
         # Extra pixel space to the left of frame 0 so the "0" label is never
         # clipped by the label column when scrolled to the origin.
         self.left_timeline_pad: int = 20
@@ -249,6 +251,7 @@ class AnimationTimelineWidget(QWidget):
 
     def update_scrollbars(self) -> None:
         """Recalculate scrollbar ranges based on content size."""
+        self._update_left_margin()
         max_frame = max((kf.t for t in self.tracks for kf in t.keyframes), default=0)
         content_width = self.left_timeline_pad + (max_frame + 20) * self.frame_width
         page_w = self.width() - self.left_margin

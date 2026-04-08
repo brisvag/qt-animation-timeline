@@ -15,7 +15,7 @@ sources = ["src"]
 
 # https://peps.python.org/pep-0621/
 [project]
-name = "qt-animation-editor"
+name = "qt-animation-timeline"
 dynamic = ["version"]
 description = "Package description."
 readme = "README.md"
@@ -35,7 +35,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 # add your package dependencies here
-dependencies = ["qtpy", "superqt"]
+dependencies = ["qtpy", "superqt", "numpy"]
 
 # https://peps.python.org/pep-0621/#dependencies-optional-dependencies
 # add dependencies for "extra" features here.  Not dev dependencies.
@@ -50,10 +50,10 @@ repository = "https://github.com/brisvag/qt-animation-editor/qt-animation-editor
 # https://peps.python.org/pep-0621/#entry-points
 # same as console_scripts entry point
 # [project.scripts]
-# qt-animation-editor-cli = "qt_animation_editor:main_cli"
+# qt-animation-timeline-cli = "qt_animation_timeline:main_cli"
 
 # [project.entry-points."some.group"]
-# tomatoes = "qt_animation_editor:main_tomatoes"
+# tomatoes = "qt_animation_timeline:main_tomatoes"
 
 # https://peps.python.org/pep-0735/
 # setup with `uv sync` or `pip install -e . --group dev`
@@ -69,7 +69,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-qt-animation-editor = { workspace = true }
+qt-animation-timeline = { workspace = true }
 
 # https://docs.astral.sh/ruff
 [tool.ruff]
@@ -132,7 +132,7 @@ exclude_lines = [
 ]
 
 [tool.coverage.run]
-source = ["qt_animation_editor"]
+source = ["qt_animation_timeline"]
 
 # https://github.com/mgedmin/check-manifest#configuration
 # add files that you want check-manifest to explicitly ignore here
