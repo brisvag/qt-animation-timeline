@@ -6,7 +6,7 @@ import itertools
 import math
 from typing import Any
 
-from qtpy.QtCore import QPoint, QRect, Qt, QTimer, Signal
+from qtpy.QtCore import QByteArray, QPoint, QRect, QRectF, Qt, QTimer, Signal
 from qtpy.QtGui import (
     QColor,
     QFont,
@@ -17,7 +17,9 @@ from qtpy.QtGui import (
     QPen,
     QWheelEvent,
 )
-from qtpy.QtWidgets import QMenu, QScrollBar, QToolTip, QWidget
+from qtpy.QtSvg import QSvgRenderer
+from qtpy.QtWidgets import QMenu, QScrollBar, QToolTip, QVBoxLayout, QWidget
+from superqt import QSearchableComboBox
 
 from qt_animation_editor.easing import EasingFunction, _coerce_value
 from qt_animation_editor.models import Keyframe, Track
@@ -55,6 +57,8 @@ _DEFAULT_COLORS: dict[str, QColor] = {
     "rubber_band_border": QColor(100, 150, 255, 200),
     "control_btn_color": QColor(60, 60, 80),
     "control_btn_text_color": QColor(200, 200, 220),
+    "loop_btn_color": QColor(60, 80, 100),
+    "loop_btn_text_color": QColor(180, 210, 230),
     "play_btn_color": QColor(60, 80, 60),
     "play_btn_text_color": QColor(180, 220, 180),
     "keyframe_selected_border_color": QColor(255, 255, 0),
@@ -64,8 +68,51 @@ _DEFAULT_COLORS: dict[str, QColor] = {
 _PLAY_NORMAL = 0
 _PLAY_LOOP = 1
 _PLAY_PINGPONG = 2
-# Unicode glyphs for each play mode shown on the mode-toggle button.
-_PLAY_MODE_ICONS = {_PLAY_NORMAL: "▷", _PLAY_LOOP: "↺", _PLAY_PINGPONG: "⇄"}
+# Icon keys (into _BUTTON_ICONS) for each play mode shown on the mode-toggle button.
+_PLAY_MODE_ICONS = {
+    _PLAY_NORMAL: "play_once",
+    _PLAY_LOOP: "loop",
+    _PLAY_PINGPONG: "pingpong",
+}
+
+# SVG path data (Material Design, viewBox "0 0 24 24") for every button icon.
+# Paths are filled shapes — colour is injected at render time via _render_svg_icon.
+_BUTTON_ICONS: dict[str, str] = {
+    "home":      "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z",
+    "play":      "M8 5v14l11-7z",
+    "pause":     "M6 19h4V5H6v14zm8-14v14h4V5h-4z",
+    "play_once": "M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z",
+    "loop":      "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v5z",
+    "pingpong":  "M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z",
+    "plus":      "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z",
+    "minus":     "M19 13H5v-2h14v2z",
+}
+
+
+def _render_svg_icon(painter: QPainter, rect: QRect, icon_key: str, color: QColor) -> None:
+    """Render a named SVG icon centred within *rect* using *color* as the fill.
+
+    The icon is always drawn as a square region centred inside *rect* so that
+    non-square buttons (e.g. the wide add-track row) don't stretch the shape.
+    The icon path is looked up from ``_BUTTON_ICONS`` and rendered via
+    ``QSvgRenderer`` so that it scales cleanly at any button size.
+    """
+    path_d = _BUTTON_ICONS[icon_key]
+    hex_color = color.name()
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+        f'<path fill="{hex_color}" d="{path_d}"/>'
+        f"</svg>"
+    )
+    renderer = QSvgRenderer(QByteArray(svg.encode()))
+    # Compute a square sub-rect centred in the button; padding scales with size.
+    side = min(rect.width(), rect.height())
+    pad = max(2, side // 6)
+    icon_side = side - 2 * pad
+    cx = rect.x() + rect.width() / 2
+    cy = rect.y() + rect.height() / 2
+    icon_rect = QRectF(cx - icon_side / 2, cy - icon_side / 2, icon_side, icon_side)
+    renderer.render(painter, icon_rect)
 
 
 class AnimationTimelineWidget(QWidget):
@@ -87,6 +134,7 @@ class AnimationTimelineWidget(QWidget):
         font_size: int = 10,
         track_color_cycle: list[QColor] | None = None,
         track_options: dict[str, tuple[Any, str]] | None = None,
+        playback_speed: float = 1.0,
         **color_kwargs: QColor,
     ) -> None:
         super().__init__(parent)
@@ -146,6 +194,7 @@ class AnimationTimelineWidget(QWidget):
         # Playback state.
         self._playing: bool = False
         self._play_fps: int = 30
+        self.playback_speed: float = playback_speed
         self._play_mode: int = _PLAY_NORMAL
         self._play_direction: int = 1
         self._play_timer = QTimer(self)
@@ -158,9 +207,6 @@ class AnimationTimelineWidget(QWidget):
 
         self.font_size: int = font_size
         self.label_font = QFont("Arial", font_size)
-        # Larger fonts for the control-button glyphs; home gets an extra boost.
-        self.home_font = QFont("Arial", font_size * 3)
-        self.control_font = QFont("Arial", font_size * 2)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         # Enable hover events for keyframe value tooltips.
@@ -276,7 +322,7 @@ class AnimationTimelineWidget(QWidget):
 
         self._draw_labels(painter, metrics)
         self._draw_add_button(painter)
-        self._draw_control_buttons(painter, metrics)
+        self._draw_control_buttons(painter)
 
         # Playhead — only when to the right of the label column.
         x = self.frame_to_x(self.current_frame)
@@ -349,10 +395,9 @@ class AnimationTimelineWidget(QWidget):
             painter.setBrush(self.remove_button_color)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRect(bx, by, btn_size, btn_size)
-            painter.setPen(Qt.GlobalColor.black)
-            lx = bx + (btn_size - metrics.horizontalAdvance("-")) // 2
-            ly = by + (btn_size + metrics.ascent() - metrics.descent()) // 2
-            painter.drawText(lx, ly, "-")
+            _render_svg_icon(
+                painter, QRect(bx, by, btn_size, btn_size), "minus", QColor(0, 0, 0)
+            )
 
     def _draw_add_button(self, painter: QPainter) -> None:
         """Draw the add-track (+) button below all track labels.
@@ -365,49 +410,31 @@ class AnimationTimelineWidget(QWidget):
         painter.setBrush(color)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRect(0, ay, self.left_margin, self.track_height)
-        cross_color = Qt.GlobalColor.black if can_add else QColor(100, 100, 100)
-        painter.setPen(cross_color)
-        cx = self.left_margin // 2
-        cy = ay + self.track_height // 2
-        painter.drawLine(cx - 8, cy, cx + 8, cy)
-        painter.drawLine(cx, cy - 8, cx, cy + 8)
+        icon_color = QColor(0, 0, 0) if can_add else QColor(100, 100, 100)
+        _render_svg_icon(
+            painter, QRect(0, ay, self.left_margin, self.track_height), "plus", icon_color
+        )
 
-    def _draw_control_buttons(self, painter: QPainter, metrics: QFontMetrics) -> None:
+    def _draw_control_buttons(self, painter: QPainter) -> None:
         """Draw the home, play-mode, and play/pause buttons in the top-left corner."""
         btn_w = self.left_margin // 3
         h = self.top_margin
+        btn_rect = QRect(0, 0, btn_w, h)
 
         # Home / reset-view button (left third).
-        painter.fillRect(0, 0, btn_w, h, self.control_btn_color)
-        painter.setPen(self.control_btn_text_color)
-        painter.setFont(self.home_font)
-        painter.drawText(
-            QRect(0, 0, btn_w, h),
-            Qt.AlignmentFlag.AlignCenter,
-            "\u2302",  # ⌂ house symbol
-        )
+        painter.fillRect(btn_rect, self.control_btn_color)
+        _render_svg_icon(painter, btn_rect, "home", self.control_btn_text_color)
 
-        # Play-mode toggle button (middle third).
-        painter.fillRect(btn_w, 0, btn_w, h, self.control_btn_color)
-        painter.setPen(self.control_btn_text_color)
-        painter.setFont(self.control_font)
-        painter.drawText(
-            QRect(btn_w, 0, btn_w, h),
-            Qt.AlignmentFlag.AlignCenter,
-            _PLAY_MODE_ICONS[self._play_mode],
-        )
+        # Play-mode toggle button (middle third) — distinct color from neighbours.
+        btn_rect.moveLeft(btn_w)
+        painter.fillRect(btn_rect, self.loop_btn_color)
+        _render_svg_icon(painter, btn_rect, _PLAY_MODE_ICONS[self._play_mode], self.loop_btn_text_color)
 
         # Play / pause button (right third).
-        painter.fillRect(2 * btn_w, 0, btn_w, h, self.play_btn_color)
-        painter.setPen(self.play_btn_text_color)
-        painter.drawText(
-            QRect(2 * btn_w, 0, btn_w, h),
-            Qt.AlignmentFlag.AlignCenter,
-            "\u23f8" if self._playing else "\u25b6",  # ⏸ / ▶
-        )
-
-        # Restore the label font so subsequent drawing is unaffected.
-        painter.setFont(self.label_font)
+        btn_rect.moveLeft(2 * btn_w)
+        painter.fillRect(btn_rect, self.play_btn_color)
+        play_icon = "pause" if self._playing else "play"
+        _render_svg_icon(painter, btn_rect, play_icon, self.play_btn_text_color)
 
     def _draw_rubber_band(self, painter: QPainter) -> None:
         assert self._box_rect is not None
@@ -767,8 +794,24 @@ class AnimationTimelineWidget(QWidget):
 
         menu.exec(global_pos)
 
+    def _get_track_change_options(self, track: Track) -> list[tuple[str, bool]]:
+        """Return ``(option_name, is_enabled)`` pairs for the track-change picker.
+
+        The ``...`` placeholder is always enabled.  Named options already used
+        by *other* tracks are disabled to enforce uniqueness.
+        """
+        used_by_others = {
+            t.name
+            for t in self.tracks
+            if t is not track and t.name != _PLACEHOLDER_TRACK
+        }
+        return [
+            (opt, opt == _PLACEHOLDER_TRACK or opt not in used_by_others)
+            for opt in [_PLACEHOLDER_TRACK, *self.track_options]
+        ]
+
     def _show_track_change_menu(self, y: int, global_pos: object) -> None:
-        """Show a context menu for changing a track to one of the configured options.
+        """Show a searchable combo-box for changing a track to one of the configured options.
 
         The ``...`` placeholder is always available.  Named options that are
         already used by *other* tracks are shown but disabled to enforce
@@ -779,27 +822,45 @@ class AnimationTimelineWidget(QWidget):
             return
 
         track = self.tracks[track_index]
-        used_by_others = {
-            t.name
-            for t in self.tracks
-            if t is not track and t.name != _PLACEHOLDER_TRACK
-        }
+        options = self._get_track_change_options(track)
 
-        menu = QMenu(self)
-        for option in [_PLACEHOLDER_TRACK, *self.track_options]:
-            action = menu.addAction(option)
-            action.setCheckable(True)
-            action.setChecked(track.name == option)
-            if option != _PLACEHOLDER_TRACK and option in used_by_others:
-                action.setEnabled(False)
+        # Float a frameless popup containing a searchable combo-box.
+        container = QWidget(None, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        container.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(0)
 
-            def _change(checked: bool, _t: Track = track, _n: str = option) -> None:
-                _t.name = _n
-                self.update()
-                self.track_changed.emit(_t)
+        combo = QSearchableComboBox(container)
+        for option, enabled in options:
+            combo.addItem(option)
+            if not enabled:
+                item = combo.model().item(combo.model().rowCount() - 1)
+                if item is not None:
+                    item.setEnabled(False)
 
-            action.triggered.connect(_change)
-        menu.exec(global_pos)
+        try:
+            current_names = [opt for opt, _ in options]
+            combo.setCurrentIndex(current_names.index(track.name))
+        except ValueError:
+            combo.setCurrentIndex(0)
+
+        layout.addWidget(combo)
+        container.adjustSize()
+        if global_pos is not None:
+            container.move(global_pos)
+        container.show()
+
+        def _apply(idx: int) -> None:
+            model_item = combo.model().item(idx)
+            if model_item is not None and not model_item.isEnabled():
+                return
+            track.name = combo.itemText(idx)
+            self.update()
+            self.track_changed.emit(track)
+            container.close()
+
+        combo.activated.connect(_apply)
 
     def _scroll_x_for_zoom(self, mouse_x: int, old_fw: float, new_fw: float) -> int:
         """Compute the ``scroll_x`` that keeps the frame under *mouse_x* fixed.
@@ -856,6 +917,9 @@ class AnimationTimelineWidget(QWidget):
             self.update()
             if removed:
                 self.keyframes_removed.emit(removed)
+                # Deleting a keyframe may change the interpolated value at the
+                # current playhead position — keep the model in sync.
+                self._dispatch_track_callbacks(self.current_frame)
         elif event.key() == Qt.Key.Key_Space:
             self._toggle_playback()
         elif event.key() == Qt.Key.Key_Left:
@@ -872,7 +936,8 @@ class AnimationTimelineWidget(QWidget):
 
     def _start_playback(self) -> None:
         self._playing = True
-        self._play_timer.start(max(1, 1000 // self._play_fps))
+        interval = max(1, int(1000 / (self._play_fps * self.playback_speed)))
+        self._play_timer.start(interval)
         self.update()
 
     def _stop_playback(self) -> None:
