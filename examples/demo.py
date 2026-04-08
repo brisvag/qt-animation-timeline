@@ -4,10 +4,6 @@ Run with::
 
     python examples/demo.py
 
-Or from IPython (non-blocking, allows modifying settings interactively)::
-
-    %run examples/demo.py
-
 The demo creates a ``Scene`` model whose fields are bound to four tracks.
 Moving the playhead prints the current field values to stdout.
 Requires NumPy (``pip install numpy``).
@@ -103,24 +99,9 @@ def build_demo() -> tuple[QWidget, AnimationTimelineWidget, Scene]:
 
 def main() -> None:
     """Run the demo application."""
-    app = QApplication.instance() or QApplication(sys.argv)
-
-    main_widget, timeline, scene = build_demo()
-
-    # When running from IPython with %gui qt the event loop is already
-    # running, so app.exec() would block.  Detect this by checking whether
-    # IPython has an active GUI event loop registered.
-    in_ipython_loop = False
-    try:
-        from IPython import get_ipython
-
-        ip = get_ipython()
-        in_ipython_loop = ip is not None and getattr(ip, "active_eventloop", None) is not None
-    except ImportError:
-        pass
-
-    if not in_ipython_loop:
-        sys.exit(app.exec())
+    app = QApplication(sys.argv)
+    build_demo()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
