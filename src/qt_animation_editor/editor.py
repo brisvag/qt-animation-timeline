@@ -6,7 +6,7 @@ import itertools
 import math
 from typing import Any
 
-from qtpy.QtCore import QPoint, QRect, Qt, QTimer, Signal
+from qtpy.QtCore import QByteArray, QPoint, QRect, QRectF, Qt, QTimer, Signal
 from qtpy.QtGui import (
     QColor,
     QFont,
@@ -18,6 +18,7 @@ from qtpy.QtGui import (
     QWheelEvent,
 )
 from qtpy.QtWidgets import QMenu, QScrollBar, QToolTip, QWidget
+from qtpy.QtSvg import QSvgRenderer
 
 from qt_animation_editor.easing import EasingFunction, _coerce_value
 from qt_animation_editor.models import Keyframe, Track
@@ -66,8 +67,44 @@ _DEFAULT_COLORS: dict[str, QColor] = {
 _PLAY_NORMAL = 0
 _PLAY_LOOP = 1
 _PLAY_PINGPONG = 2
-# Unicode glyphs for each play mode shown on the mode-toggle button.
-_PLAY_MODE_ICONS = {_PLAY_NORMAL: "→", _PLAY_LOOP: "↺", _PLAY_PINGPONG: "⇄"}
+# Icon keys (into _BUTTON_ICONS) for each play mode shown on the mode-toggle button.
+_PLAY_MODE_ICONS = {_PLAY_NORMAL: "play_once", _PLAY_LOOP: "loop", _PLAY_PINGPONG: "pingpong"}
+
+# SVG path data (Material Design, viewBox "0 0 24 24") for every button icon.
+# Paths are filled shapes — colour is injected at render time via _render_svg_icon.
+_BUTTON_ICONS: dict[str, str] = {
+    "home":      "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z",
+    "play":      "M8 5v14l11-7z",
+    "pause":     "M6 19h4V5H6v14zm8-14v14h4V5h-4z",
+    "play_once": "M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z",
+    "loop":      "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v5z",
+    "pingpong":  "M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z",
+}
+
+
+def _render_svg_icon(painter: QPainter, rect: QRect, icon_key: str, color: QColor) -> None:
+    """Render a named SVG icon centred within *rect* using *color* as the fill.
+
+    The icon path is looked up from ``_BUTTON_ICONS`` and rendered via
+    ``QSvgRenderer`` so that it always scales cleanly to the button size with
+    consistent centering regardless of the active font.
+    """
+    path_d = _BUTTON_ICONS[icon_key]
+    hex_color = color.name()
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+        f'<path fill="{hex_color}" d="{path_d}"/>'
+        f"</svg>"
+    )
+    renderer = QSvgRenderer(QByteArray(svg.encode()))
+    pad = max(4, min(rect.width(), rect.height()) // 6)
+    icon_rect = QRectF(
+        rect.x() + pad,
+        rect.y() + pad,
+        rect.width() - 2 * pad,
+        rect.height() - 2 * pad,
+    )
+    renderer.render(painter, icon_rect)
 
 
 class AnimationTimelineWidget(QWidget):
@@ -162,9 +199,6 @@ class AnimationTimelineWidget(QWidget):
 
         self.font_size: int = font_size
         self.label_font = QFont("Arial", font_size)
-        # Larger fonts for the control-button glyphs; home gets an extra boost.
-        self.home_font = QFont("Arial", font_size * 3)
-        self.control_font = QFont("Arial", font_size * 2)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         # Enable hover events for keyframe value tooltips.
@@ -280,7 +314,7 @@ class AnimationTimelineWidget(QWidget):
 
         self._draw_labels(painter, metrics)
         self._draw_add_button(painter)
-        self._draw_control_buttons(painter, metrics)
+        self._draw_control_buttons(painter)
 
         # Playhead — only when to the right of the label column.
         x = self.frame_to_x(self.current_frame)
@@ -376,43 +410,26 @@ class AnimationTimelineWidget(QWidget):
         painter.drawLine(cx - 8, cy, cx + 8, cy)
         painter.drawLine(cx, cy - 8, cx, cy + 8)
 
-    def _draw_control_buttons(self, painter: QPainter, metrics: QFontMetrics) -> None:
+    def _draw_control_buttons(self, painter: QPainter) -> None:
         """Draw the home, play-mode, and play/pause buttons in the top-left corner."""
         btn_w = self.left_margin // 3
         h = self.top_margin
+        btn_rect = QRect(0, 0, btn_w, h)
 
         # Home / reset-view button (left third).
-        painter.fillRect(0, 0, btn_w, h, self.control_btn_color)
-        painter.setPen(self.control_btn_text_color)
-        painter.setFont(self.home_font)
-        painter.drawText(
-            QRect(0, 0, btn_w, h),
-            Qt.AlignmentFlag.AlignCenter,
-            "\u2302",  # ⌂ house symbol
-        )
+        painter.fillRect(btn_rect, self.control_btn_color)
+        _render_svg_icon(painter, btn_rect, "home", self.control_btn_text_color)
 
         # Play-mode toggle button (middle third) — distinct color from neighbours.
-        painter.fillRect(btn_w, 0, btn_w, h, self.loop_btn_color)
-        painter.setPen(self.loop_btn_text_color)
-        painter.setFont(self.control_font)
-        painter.drawText(
-            QRect(btn_w, 0, btn_w, h),
-            Qt.AlignmentFlag.AlignCenter,
-            _PLAY_MODE_ICONS[self._play_mode],
-        )
+        btn_rect.moveLeft(btn_w)
+        painter.fillRect(btn_rect, self.loop_btn_color)
+        _render_svg_icon(painter, btn_rect, _PLAY_MODE_ICONS[self._play_mode], self.loop_btn_text_color)
 
         # Play / pause button (right third).
-        painter.fillRect(2 * btn_w, 0, btn_w, h, self.play_btn_color)
-        painter.setPen(self.play_btn_text_color)
-        painter.setFont(self.control_font)
-        painter.drawText(
-            QRect(2 * btn_w, 0, btn_w, h),
-            Qt.AlignmentFlag.AlignCenter,
-            "\u23f8" if self._playing else "\u25b6",  # ⏸ / ▶
-        )
-
-        # Restore the label font so subsequent drawing is unaffected.
-        painter.setFont(self.label_font)
+        btn_rect.moveLeft(2 * btn_w)
+        painter.fillRect(btn_rect, self.play_btn_color)
+        play_icon = "pause" if self._playing else "play"
+        _render_svg_icon(painter, btn_rect, play_icon, self.play_btn_text_color)
 
     def _draw_rubber_band(self, painter: QPainter) -> None:
         assert self._box_rect is not None

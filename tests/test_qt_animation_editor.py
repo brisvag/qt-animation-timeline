@@ -11,6 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import qt_animation_editor
 from qt_animation_editor.easing import EasingFunction, _coerce_value
 from qt_animation_editor.editor import (
+    _BUTTON_ICONS,
     _DEFAULT_COLORS,
     _PLACEHOLDER_TRACK,
     _PLAY_LOOP,
@@ -696,8 +697,17 @@ def test_loop_btn_color_distinct(qapp):
     assert "loop_btn_color" in _DEFAULT_COLORS
 
 
-def test_forward_only_icon_is_arrow():
-    assert _PLAY_MODE_ICONS[_PLAY_NORMAL] == "→"
+def test_play_mode_icons():
+    # Every play mode must have an icon defined in _BUTTON_ICONS.
+    for key in _PLAY_MODE_ICONS.values():
+        assert key in _BUTTON_ICONS
+    # Each mode maps to a distinct icon.
+    assert len(set(_PLAY_MODE_ICONS.values())) == len(_PLAY_MODE_ICONS)
+    # Normal mode is not the loop or pingpong icon.
+    assert _PLAY_MODE_ICONS[_PLAY_NORMAL] not in (
+        _PLAY_MODE_ICONS[_PLAY_LOOP],
+        _PLAY_MODE_ICONS[_PLAY_PINGPONG],
+    )
 
 
 def test_playback_speed(qapp):
