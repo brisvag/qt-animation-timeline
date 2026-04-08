@@ -1,19 +1,24 @@
 import os
 
+import numpy as np
 import pytest
 from qtpy.QtCore import QEvent, QPoint, QRect, Qt
-from qtpy.QtGui import QKeyEvent, QMouseEvent
+from qtpy.QtGui import QColor, QKeyEvent, QMouseEvent
 from qtpy.QtWidgets import QApplication
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import qt_animation_editor
-from qt_animation_editor.easing import EasingFunction
+from qt_animation_editor.easing import EasingFunction, _coerce_value
 from qt_animation_editor.editor import (
+    _DEFAULT_COLORS,
     _PLACEHOLDER_TRACK,
+    _PLAY_LOOP,
+    _PLAY_NORMAL,
+    _PLAY_PINGPONG,
     AnimationTimelineWidget,
 )
-from qt_animation_editor.models import Keyframe, Track, _coerce_value
+from qt_animation_editor.models import Keyframe, Track
 
 
 @pytest.fixture(scope="session")
@@ -177,7 +182,7 @@ class TestAnimationTimelineWidget:
 
         w = AnimationTimelineWidget()
         red = QColor(255, 0, 0)
-        w.track_colors = [red]
+        w.track_color_cycle = [red]
         track = w.add_track("A")
         assert track.color == red
 
@@ -876,3 +881,225 @@ class TestDefaultColors:
         assert c.red() == 0
         assert c.green() == 114
         assert c.blue() == 178
+
+
+# ---------------------------------------------------------------------------
+# Numpy interpolation
+# ---------------------------------------------------------------------------
+
+
+class TestNumpyInterpolation:
+    def test_linear_midpoint_numpy(self, qapp):
+        """Linear easing should interpolate numpy arrays element-wise."""
+        v0 = np.array([0.0, 0.0, 0.0])
+        v1 = np.array([10.0, 20.0, 30.0])
+        result = EasingFunction.Linear(0.5, v0, v1)
+        np.testing.assert_allclose(result, [5.0, 10.0, 15.0])
+
+    def test_linear_bounds_numpy(self, qapp):
+        v0 = np.array([1.0, 2.0])
+        v1 = np.array([3.0, 4.0])
+        np.testing.assert_allclose(EasingFunction.Linear(0.0, v0, v1), v0)
+        np.testing.assert_allclose(EasingFunction.Linear(1.0, v0, v1), v1)
+
+    def test_step_easing_numpy(self, qapp):
+        """Step easing returns one of the original arrays without modification."""
+        v0 = np.array([1.0, 2.0])
+        v1 = np.array([3.0, 4.0])
+        assert EasingFunction.Step(0.3, v0, v1) is v0
+        assert EasingFunction.Step(0.5, v0, v1) is v1
+
+    def test_coerce_value_numpy_passthrough(self, qapp):
+        """Numpy arrays should be returned unchanged by _coerce_value."""
+        arr = np.array([1.0, 2.0, 3.0])
+        result = _coerce_value(arr, arr * 2)
+        np.testing.assert_allclose(result, [2.0, 4.0, 6.0])
+
+    def test_track_interpolation_numpy(self, qapp):
+        """Track interpolation must work end-to-end with numpy array values."""
+        w = AnimationTimelineWidget()
+        w.add_track("A")
+        w.tracks[0].add_keyframe(0, value=np.array([0.0, 0.0]))
+        w.tracks[0].add_keyframe(100, value=np.array([10.0, 20.0]))
+        result = w._interpolate_track(w.tracks[0], 50)
+        np.testing.assert_allclose(result, [5.0, 10.0])
+
+    def test_dispatch_updates_numpy_field(self, qapp):
+        """Playhead movement must update a numpy-array model field in-place."""
+
+        class Model:
+            angles = np.array([0.0, 0.0, 0.0])
+
+        m = Model()
+        w = AnimationTimelineWidget()
+        w.track_options = {"A": (m, "angles")}
+        w.add_track("A")
+        w.tracks[0].add_keyframe(0, value=np.array([0.0, 0.0, 0.0]))
+        w.tracks[0].add_keyframe(100, value=np.array([10.0, 20.0, 30.0]))
+
+        w._set_playhead(50)
+        np.testing.assert_allclose(m.angles, [5.0, 10.0, 15.0])
+
+
+# ---------------------------------------------------------------------------
+# Constructor kwargs
+# ---------------------------------------------------------------------------
+
+
+class TestConstructorKwargs:
+    def test_color_kwarg_overrides_default(self, qapp):
+        red = QColor(255, 0, 0)
+        w = AnimationTimelineWidget(bg_color=red)
+        assert w.bg_color == red
+
+    def test_default_colors_dict_has_all_keys(self, qapp):
+        for key in _DEFAULT_COLORS:
+            assert hasattr(AnimationTimelineWidget(), key)
+
+    def test_track_color_cycle_kwarg(self, qapp):
+        red = QColor(255, 0, 0)
+        w = AnimationTimelineWidget(track_color_cycle=[red])
+        track = w.add_track("A")
+        assert track.color == red
+
+    def test_track_options_kwarg(self, qapp):
+        class Model:
+            x = 0.0
+
+        m = Model()
+        w = AnimationTimelineWidget(track_options={"A": (m, "x")})
+        assert "A" in w.track_options
+
+    def test_font_size_kwarg(self, qapp):
+        w = AnimationTimelineWidget(font_size=14)
+        assert w.font_size == 14
+        assert w.label_font.pointSize() == 14
+
+
+# ---------------------------------------------------------------------------
+# Arrow key navigation
+# ---------------------------------------------------------------------------
+
+
+class TestArrowKeys:
+    def _key_press(self, key):
+        return QKeyEvent(
+            QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier
+        )
+
+    def test_right_arrow_advances_frame(self, qapp):
+        w = AnimationTimelineWidget()
+        w._set_playhead(5)
+        w.keyPressEvent(self._key_press(Qt.Key.Key_Right))
+        assert w.current_frame == 6
+
+    def test_left_arrow_retreats_frame(self, qapp):
+        w = AnimationTimelineWidget()
+        w._set_playhead(5)
+        w.keyPressEvent(self._key_press(Qt.Key.Key_Left))
+        assert w.current_frame == 4
+
+    def test_left_arrow_clamps_at_zero(self, qapp):
+        w = AnimationTimelineWidget()
+        w._set_playhead(0)
+        w.keyPressEvent(self._key_press(Qt.Key.Key_Left))
+        assert w.current_frame == 0
+
+
+# ---------------------------------------------------------------------------
+# Play modes
+# ---------------------------------------------------------------------------
+
+
+class TestPlayModes:
+    def test_initial_play_mode_is_normal(self, qapp):
+        w = AnimationTimelineWidget()
+        assert w._play_mode == _PLAY_NORMAL
+
+    def test_cycle_advances_to_loop(self, qapp):
+        w = AnimationTimelineWidget()
+        w._cycle_play_mode()
+        assert w._play_mode == _PLAY_LOOP
+
+    def test_cycle_advances_to_pingpong(self, qapp):
+        w = AnimationTimelineWidget()
+        w._cycle_play_mode()
+        w._cycle_play_mode()
+        assert w._play_mode == _PLAY_PINGPONG
+
+    def test_cycle_wraps_back_to_normal(self, qapp):
+        w = AnimationTimelineWidget()
+        for _ in range(3):
+            w._cycle_play_mode()
+        assert w._play_mode == _PLAY_NORMAL
+
+    def test_normal_mode_stops_at_last_keyframe(self, qapp):
+        w = AnimationTimelineWidget()
+        w.add_track("A")
+        w.tracks[0].add_keyframe(0, value=0.0)
+        w.tracks[0].add_keyframe(5, value=1.0)
+        w._play_mode = _PLAY_NORMAL
+        w._start_playback()
+        # Simulate advancing past the last keyframe.
+        w._set_playhead(5)
+        w._advance_playhead()
+        assert not w._playing
+        assert w.current_frame == 5
+
+    def test_loop_mode_wraps_to_zero(self, qapp):
+        w = AnimationTimelineWidget()
+        w.add_track("A")
+        w.tracks[0].add_keyframe(0, value=0.0)
+        w.tracks[0].add_keyframe(5, value=1.0)
+        w._play_mode = _PLAY_LOOP
+        w._set_playhead(5)
+        w._advance_playhead()
+        assert w.current_frame == 0
+
+    def test_pingpong_reverses_at_end(self, qapp):
+        w = AnimationTimelineWidget()
+        w.add_track("A")
+        w.tracks[0].add_keyframe(0, value=0.0)
+        w.tracks[0].add_keyframe(5, value=1.0)
+        w._play_mode = _PLAY_PINGPONG
+        w._play_direction = 1
+        w._set_playhead(5)
+        w._advance_playhead()
+        assert w._play_direction == -1
+
+    def test_pingpong_reverses_at_start(self, qapp):
+        w = AnimationTimelineWidget()
+        w.add_track("A")
+        w.tracks[0].add_keyframe(0, value=0.0)
+        w.tracks[0].add_keyframe(5, value=1.0)
+        w._play_mode = _PLAY_PINGPONG
+        w._play_direction = -1
+        w._set_playhead(0)
+        w._advance_playhead()
+        assert w._play_direction == 1
+
+
+# ---------------------------------------------------------------------------
+# Last-frame clamping
+# ---------------------------------------------------------------------------
+
+
+class TestLastFrameClamping:
+    def test_normal_play_stops_at_last_keyframe(self, qapp):
+        w = AnimationTimelineWidget()
+        w.add_track("A")
+        w.tracks[0].add_keyframe(0, value=0.0)
+        w.tracks[0].add_keyframe(10, value=1.0)
+        w._play_mode = _PLAY_NORMAL
+        w._start_playback()
+        w._set_playhead(10)
+        w._advance_playhead()
+        assert w.current_frame == 10
+        assert not w._playing
+
+    def test_no_keyframes_does_not_crash(self, qapp):
+        w = AnimationTimelineWidget()
+        w._play_mode = _PLAY_NORMAL
+        w._start_playback()
+        w._advance_playhead()  # max_frame defaults to 0
+        assert not w._playing
