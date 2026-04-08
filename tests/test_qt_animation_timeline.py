@@ -707,3 +707,299 @@ def test_playback_speed(qapp):
     assert w.playback_speed == 2.0
     w.playback_speed = 0.5
     assert w.playback_speed == 0.5
+
+
+# ------------------------------------------------------------------ #
+# Auto-adjust left column width                                        #
+# ------------------------------------------------------------------ #
+
+def test_left_margin_auto_adjusts(qapp):
+    w = AnimationTimelineWidget()
+    w.resize(800, 300)
+    # No tracks: stays at minimum.
+    assert w.left_margin == w._left_margin_min
+
+    w.add_track("A")
+    w.update_scrollbars()
+    margin_short = w.left_margin
+
+    w.add_track("A very long track label name")
+    w.update_scrollbars()
+    margin_long = w.left_margin
+
+    assert margin_long > margin_short
+    assert margin_long >= w._left_margin_min
+
+
+def test_left_margin_minimum_respected(qapp):
+    w = AnimationTimelineWidget()
+    w.resize(800, 300)
+    # Even with a short label, margin never drops below the minimum.
+    w.add_track("X")
+    w.update_scrollbars()
+    assert w.left_margin >= w._left_margin_min
+
+
+# ------------------------------------------------------------------ #
+# list / tuple value handling                                          #
+# ------------------------------------------------------------------ #
+
+def test_coerce_value_list(qapp):
+    from qt_animation_timeline.easing import _coerce_value
+    ref = [1.0, 2.0, 3.0]
+    result = _coerce_value(ref, np.array([1.5, 2.5, 3.5]))
+    assert isinstance(result, list)
+    assert result == pytest.approx([1.5, 2.5, 3.5])
+
+
+def test_coerce_value_tuple(qapp):
+    from qt_animation_timeline.easing import _coerce_value
+    ref = (1.0, 2.0)
+    result = _coerce_value(ref, np.array([0.5, 1.5]))
+    assert isinstance(result, tuple)
+    assert result == pytest.approx((0.5, 1.5))
+
+
+def test_coerce_value_nested_list(qapp):
+    from qt_animation_timeline.easing import _coerce_value
+    ref = [[1.0, 2.0], [3.0, 4.0]]
+    result = _coerce_value(ref, np.array([[1.5, 2.5], [3.5, 4.5]]))
+    assert isinstance(result, list)
+    assert isinstance(result[0], list)
+    assert result[0] == pytest.approx([1.5, 2.5])
+    assert result[1] == pytest.approx([3.5, 4.5])
+
+
+def test_interpolate_list_values(qapp):
+    w = AnimationTimelineWidget()
+    w.add_track("A")
+    w.tracks[0].add_keyframe(0, value=[0.0, 0.0])
+    w.tracks[0].add_keyframe(100, value=[10.0, 20.0])
+    result = w._interpolate_track(w.tracks[0], 50)
+    assert result == pytest.approx([5.0, 10.0])
+
+
+def test_interpolate_tuple_values(qapp):
+    w = AnimationTimelineWidget()
+    w.add_track("A")
+    w.tracks[0].add_keyframe(0, value=(0.0, 100.0))
+    w.tracks[0].add_keyframe(100, value=(100.0, 0.0))
+    # _interpolate_track converts to numpy for arithmetic; dispatch casts back to tuple.
+    result = w._interpolate_track(w.tracks[0], 50)
+    np.testing.assert_allclose(result, [50.0, 50.0])
+
+
+def test_dispatch_list_cast_back(qapp):
+    class Model:
+        pos = [0.0, 0.0]
+
+    m = Model()
+    w = AnimationTimelineWidget()
+    w.track_options = {"A": (m, "pos")}
+    w.add_track("A")
+    w.tracks[0].add_keyframe(0, value=[0.0, 0.0])
+    w.tracks[0].add_keyframe(100, value=[10.0, 20.0])
+    w._set_playhead(50)
+    assert isinstance(m.pos, list)
+    assert m.pos == pytest.approx([5.0, 10.0])
+
+
+def test_dispatch_tuple_cast_back(qapp):
+    class Model:
+        pos = (0.0, 0.0)
+
+    m = Model()
+    w = AnimationTimelineWidget()
+    w.track_options = {"A": (m, "pos")}
+    w.add_track("A")
+    w.tracks[0].add_keyframe(0, value=(0.0, 0.0))
+    w.tracks[0].add_keyframe(100, value=(10.0, 20.0))
+    w._set_playhead(50)
+    assert isinstance(m.pos, tuple)
+    assert m.pos == pytest.approx((5.0, 10.0))
+
+
+# ------------------------------------------------------------------ #
+# Pydantic / dataclass dispatch                                        #
+# ------------------------------------------------------------------ #
+
+def test_dispatch_dataclass(qapp):
+    import dataclasses
+
+    @dataclasses.dataclass
+    class Pose:
+        x: float = 0.0
+        y: float = 0.0
+
+    pose = Pose(x=0.0, y=0.0)
+
+    class Model:
+        state = pose
+
+    m = Model()
+    w = AnimationTimelineWidget()
+    w.track_options = {"A": (m, "state")}
+    w.add_track("A")
+    w.tracks[0].add_keyframe(0, value=Pose(x=0.0, y=0.0), easing=EasingFunction.Step)
+    w.tracks[0].add_keyframe(100, value=Pose(x=10.0, y=20.0))
+    w._set_playhead(50)
+    # Step easing at p=0.5 → second keyframe value applied in-place.
+    assert m.state is pose  # updated in-place, not replaced
+    assert m.state.x == pytest.approx(10.0)
+    assert m.state.y == pytest.approx(20.0)
+
+
+def test_dispatch_dataclass_skips_properties(qapp):
+    import dataclasses
+
+    @dataclasses.dataclass
+    class Rect:
+        w: float = 2.0
+        h: float = 3.0
+
+        @property
+        def area(self) -> float:
+            return self.w * self.h
+
+    r = Rect()
+
+    class Model:
+        shape = r
+
+    m = Model()
+    w = AnimationTimelineWidget()
+    w.track_options = {"A": (m, "shape")}
+    w.add_track("A")
+    w.tracks[0].add_keyframe(0, value=Rect(w=2.0, h=3.0), easing=EasingFunction.Step)
+    w.tracks[0].add_keyframe(100, value=Rect(w=4.0, h=6.0))
+    # Should not raise even though 'area' is a property.
+    w._set_playhead(50)
+    assert m.shape.w == pytest.approx(4.0)
+
+
+def test_dispatch_dataclass_with_update_method(qapp):
+    import dataclasses
+
+    @dataclasses.dataclass
+    class Config:
+        speed: float = 1.0
+        enabled: bool = True
+
+        def update(self, data: dict) -> None:
+            for k, v in data.items():
+                setattr(self, k, v)
+
+    cfg = Config()
+
+    class Model:
+        config = cfg
+
+    m = Model()
+    w = AnimationTimelineWidget()
+    w.track_options = {"A": (m, "config")}
+    w.add_track("A")
+    w.tracks[0].add_keyframe(0, value=Config(speed=1.0, enabled=True), easing=EasingFunction.Step)
+    w.tracks[0].add_keyframe(100, value=Config(speed=5.0, enabled=False))
+    w._set_playhead(50)
+    assert m.config is cfg  # same object
+    assert m.config.speed == pytest.approx(5.0)
+
+
+# ------------------------------------------------------------------ #
+# track_options cleanup                                                #
+# ------------------------------------------------------------------ #
+
+def test_track_removed_when_option_deleted(qapp):
+    w = AnimationTimelineWidget()
+    w.track_options = {"A": (object(), "x"), "B": (object(), "y")}
+    w.add_track("A")
+    w.add_track("B")
+    assert len(w.tracks) == 2
+
+    removed = []
+    w.track_removed.connect(removed.append)
+    del w.track_options["B"]
+
+    assert len(w.tracks) == 1
+    assert w.tracks[0].name == "A"
+    assert len(removed) == 1
+    assert removed[0].name == "B"
+
+
+def test_track_removed_on_options_reassign(qapp):
+    w = AnimationTimelineWidget()
+    w.track_options = {"A": (object(), "x"), "B": (object(), "y")}
+    w.add_track("A")
+    w.add_track("B")
+
+    removed = []
+    w.track_removed.connect(removed.append)
+    w.track_options = {"A": (object(), "x")}
+
+    assert len(w.tracks) == 1
+    assert w.tracks[0].name == "A"
+    assert len(removed) == 1
+
+
+def test_placeholder_kept_on_options_cleanup(qapp):
+    w = AnimationTimelineWidget()
+    w.track_options = {"A": (object(), "x")}
+    w.add_track("A")
+    w.add_track()  # placeholder "..."
+
+    del w.track_options["A"]
+
+    names = {t.name for t in w.tracks}
+    assert _PLACEHOLDER_TRACK in names
+    assert "A" not in names
+
+
+def test_track_options_pop(qapp):
+    w = AnimationTimelineWidget()
+    w.track_options = {"A": (object(), "x"), "B": (object(), "y")}
+    w.add_track("A")
+    w.add_track("B")
+    w.track_options.pop("A")
+    assert all(t.name != "A" for t in w.tracks)
+
+
+def test_track_options_clear(qapp):
+    # clear() removes all keys → all named tracks that had an option are removed.
+    # Placeholder tracks are always kept.
+    w = AnimationTimelineWidget()
+    w.track_options = {"A": (object(), "x")}
+    w.add_track("A")
+    w.add_track()  # placeholder "..."
+    w.track_options.clear()
+    names = {t.name for t in w.tracks}
+    assert "A" not in names
+    assert _PLACEHOLDER_TRACK in names
+
+
+def test_selected_keyframes_cleared_on_cleanup(qapp):
+    w = AnimationTimelineWidget()
+    w.track_options = {"A": (object(), "x")}
+    w.add_track("A")
+    kf = w.tracks[0].add_keyframe(10)
+    w.selected_keyframes = [kf]
+    del w.track_options["A"]
+    assert kf not in w.selected_keyframes
+
+
+# ------------------------------------------------------------------ #
+# Size hints                                                           #
+# ------------------------------------------------------------------ #
+
+def test_size_hint(qapp):
+    from qtpy.QtCore import QSize
+    w = AnimationTimelineWidget()
+    sh = w.sizeHint()
+    msh = w.minimumSizeHint()
+    # sizeHint fits ≥4 tracks (height) and ≥50 frames (width).
+    assert sh.height() >= w.top_margin + 4 * w.track_height
+    assert sh.width() > w._left_margin_min
+    # minimumSizeHint is strictly smaller in both dimensions.
+    assert msh.width() <= sh.width()
+    assert msh.height() <= sh.height()
+    assert isinstance(sh, QSize)
+    assert isinstance(msh, QSize)

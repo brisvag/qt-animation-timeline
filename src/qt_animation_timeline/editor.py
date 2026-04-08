@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 import math
 from typing import Any
 
-from qtpy.QtCore import QByteArray, QPoint, QRect, QRectF, Qt, QTimer, Signal
+import numpy as np
+from qtpy.QtCore import QByteArray, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
 from qtpy.QtGui import (
     QColor,
     QFont,
@@ -115,6 +117,92 @@ def _render_svg_icon(painter: QPainter, rect: QRect, icon_key: str, color: QColo
     renderer.render(painter, icon_rect)
 
 
+# Sentinel for "attribute not found" in _apply_model_value.
+_MISSING = object()
+
+
+def _is_model_instance(obj: Any) -> bool:
+    """Return ``True`` if *obj* is a pydantic model or dataclass instance."""
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return True
+    # pydantic v2 has model_dump; pydantic v1 has dict + __fields__.
+    return hasattr(obj, "model_dump") or (
+        hasattr(obj, "dict") and hasattr(obj, "__fields__")
+    )
+
+
+def _apply_model_value(target: Any, source: Any) -> None:
+    """Apply pydantic/dataclass field values from *source* to *target* in-place.
+
+    Prefers a user-supplied ``update(dict)`` method (same signature as
+    ``dict.update``).  Falls back to field-by-field ``setattr``, skipping
+    computed fields (properties) and recursing into nested models.  Frozen
+    models / dataclasses silently ignore unwritable fields.
+    """
+    if hasattr(source, "model_dump"):
+        data = source.model_dump()
+    elif hasattr(source, "dict") and hasattr(source, "__fields__"):
+        data = source.dict()  # pydantic v1
+    elif dataclasses.is_dataclass(source) and not isinstance(source, type):
+        data = {f.name: getattr(source, f.name) for f in dataclasses.fields(source)}
+    else:
+        return
+
+    if hasattr(target, "update") and callable(getattr(target, "update")):
+        target.update(data)
+        return
+
+    for key, val in data.items():
+        # Skip computed fields (properties) on the target class.
+        if isinstance(getattr(type(target), key, None), property):
+            continue
+        existing = getattr(target, key, _MISSING)
+        try:
+            if existing is not _MISSING and _is_model_instance(existing) and _is_model_instance(val):
+                _apply_model_value(existing, val)
+            else:
+                setattr(target, key, val)
+        except (AttributeError, TypeError):
+            pass
+
+
+class _TrackOptionsDict(dict):
+    """A ``dict`` subclass that removes orphan tracks when keys are deleted.
+
+    Every mutating operation that *removes* a key triggers
+    ``_cleanup_orphan_tracks()`` on the owning widget, passing the exact set
+    of removed keys so only the matching tracks are cleaned up.
+    """
+
+    __slots__ = ("_widget",)
+
+    def __init__(self, data: dict, widget: Any) -> None:
+        super().__init__(data)
+        self._widget = widget
+
+    def __delitem__(self, key: str) -> None:
+        super().__delitem__(key)
+        self._widget._cleanup_orphan_tracks({key})
+
+    def pop(self, *args: Any) -> Any:  # type: ignore[override]
+        key = args[0]
+        existed = key in self
+        result = super().pop(*args)
+        if existed:
+            self._widget._cleanup_orphan_tracks({key})
+        return result
+
+    def popitem(self) -> tuple[str, Any]:
+        key, val = super().popitem()
+        self._widget._cleanup_orphan_tracks({key})
+        return key, val
+
+    def clear(self) -> None:
+        removed = set(self.keys())
+        super().clear()
+        self._widget._cleanup_orphan_tracks(removed)
+
+
 class AnimationTimelineWidget(QWidget):
     """Interactive animation timeline widget."""
 
@@ -172,8 +260,8 @@ class AnimationTimelineWidget(QWidget):
         # When a keyframe is created the current field value is used as its value.
         # The "..." placeholder track is always available and needs no binding.
         # Example: ``{"x": (my_object, "x"), "y": (my_object, "y")}``
-        self.track_options: dict[str, tuple[Any, str]] = (
-            dict(track_options) if track_options is not None else {}
+        self._track_options: _TrackOptionsDict = _TrackOptionsDict(
+            track_options if track_options is not None else {}, self
         )
 
         self.current_frame: int = 0
@@ -213,6 +301,43 @@ class AnimationTimelineWidget(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         # Enable hover events for keyframe value tooltips.
         self.setMouseTracking(True)
+
+    # ------------------------------------------------------------------ #
+    # track_options property                                               #
+    # ------------------------------------------------------------------ #
+
+    @property
+    def track_options(self) -> _TrackOptionsDict:
+        """Mapping of track name → (model, field) bindings.
+
+        Assigning a new dict replaces the options and immediately removes any
+        tracks whose names are no longer present (except the placeholder).
+        In-place deletions (``del``, ``pop``, ``clear``, ``popitem``) trigger
+        the same cleanup automatically.
+        """
+        return self._track_options
+
+    @track_options.setter
+    def track_options(self, value: dict[str, tuple[Any, str]]) -> None:
+        removed_keys = set(self._track_options) - set(value)
+        self._track_options = _TrackOptionsDict(value, self)
+        self._cleanup_orphan_tracks(removed_keys)
+
+    # ------------------------------------------------------------------ #
+    # Size hints                                                           #
+    # ------------------------------------------------------------------ #
+
+    def sizeHint(self) -> QSize:
+        """Return a default size fitting ≥ 4 tracks and ≥ 50 visible frames."""
+        w = int(self._left_margin_min + self.left_timeline_pad + 50 * _DEFAULT_FRAME_WIDTH)
+        h = self.top_margin + 4 * self.track_height + 20  # +20 for h-scrollbar
+        return QSize(w, h)
+
+    def minimumSizeHint(self) -> QSize:
+        """Return the minimum useful size: 2 tracks high and 10 frames wide."""
+        w = int(self._left_margin_min + self.left_timeline_pad + 10 * _DEFAULT_FRAME_WIDTH)
+        h = self.top_margin + 2 * self.track_height + 20
+        return QSize(w, h)
 
     def frame_to_x(self, frame: int | float) -> float:
         """Convert a frame number to a pixel x coordinate."""
@@ -276,6 +401,38 @@ class AnimationTimelineWidget(QWidget):
     def _on_vscroll(self, v: int) -> None:
         self.scroll_y = v
         self.update()
+
+    def _update_left_margin(self) -> None:
+        """Recompute ``left_margin`` to fit the widest track label."""
+        if not self.tracks:
+            self.left_margin = self._left_margin_min
+            return
+        metrics = QFontMetrics(self.label_font)
+        # Labels are drawn starting at x=40; add 10 px right padding.
+        max_text_w = max(metrics.horizontalAdvance(t.name) for t in self.tracks)
+        self.left_margin = max(self._left_margin_min, 40 + max_text_w + 10)
+
+    def _cleanup_orphan_tracks(self, removed_keys: set[str]) -> None:
+        """Remove tracks whose names appear in *removed_keys*.
+
+        The placeholder track (``"..."``) is always kept regardless.
+        Clears any selected keyframes that belonged to the removed tracks.
+        """
+        targets = removed_keys - {_PLACEHOLDER_TRACK}
+        if not targets:
+            return
+        removed = [t for t in self.tracks if t.name in targets]
+        if not removed:
+            return
+        removed_kfs = {kf for t in removed for kf in t.keyframes}
+        self.tracks = [t for t in self.tracks if t.name not in targets]
+        self.selected_keyframes = [
+            kf for kf in self.selected_keyframes if kf not in removed_kfs
+        ]
+        self.update_scrollbars()
+        self.update()
+        for t in removed:
+            self.track_removed.emit(t)
 
     def zoom_step(self) -> int:
         """Return the frame-label interval appropriate for the current zoom level.
@@ -1017,7 +1174,11 @@ class AnimationTimelineWidget(QWidget):
         self.update()
 
     def _dispatch_track_callbacks(self, frame: int) -> None:
-        """Set each bound model field to the interpolated track value at *frame*."""
+        """Set each bound model field to the interpolated track value at *frame*.
+
+        For pydantic models and dataclasses the value is applied in-place via
+        ``_apply_model_value`` rather than replaced wholesale.
+        """
         for track in self.tracks:
             if track.name == _PLACEHOLDER_TRACK:
                 continue
@@ -1029,7 +1190,12 @@ class AnimationTimelineWidget(QWidget):
             if value is None:
                 continue
             reference = getattr(model, field)
-            setattr(model, field, _coerce_value(reference, value))
+            if _is_model_instance(reference):
+                if _is_model_instance(value):
+                    _apply_model_value(reference, value)
+                # If value isn't a model (e.g. Step returned raw dict), skip.
+            else:
+                setattr(model, field, _coerce_value(reference, value))
 
     def _interpolate_track(self, track: Track, frame: int) -> Any | None:
         """Return the interpolated value of *track* at *frame*, or ``None`` if empty.
@@ -1037,6 +1203,10 @@ class AnimationTimelineWidget(QWidget):
         Easing is per-segment: the keyframe at the start of each interval
         controls the interpolation curve.  Values before the first keyframe
         and after the last keyframe are held constant.
+
+        ``list`` and ``tuple`` keyframe values are converted to numpy arrays
+        before easing so that arithmetic works correctly; ``_coerce_value``
+        casts the result back to the original container type during dispatch.
         """
         kfs = track.keyframes
         if not kfs:
@@ -1051,7 +1221,11 @@ class AnimationTimelineWidget(QWidget):
                 if span == 0:
                     return k2.value
                 p = (frame - k1.t) / span
-                return k1.easing(p, k1.value, k2.value)
+                v1, v2 = k1.value, k2.value
+                if isinstance(v1, (list, tuple)) or isinstance(v2, (list, tuple)):
+                    v1 = np.asarray(v1, dtype=float)
+                    v2 = np.asarray(v2, dtype=float)
+                return k1.easing(p, v1, v2)
         return kfs[-1].value  # unreachable, but keeps type-checker happy
 
     def _can_add_track(self) -> bool:

@@ -5,15 +5,18 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
+import numpy as np
+
 
 def _coerce_value(reference: Any, interpolated: Any) -> Any:
-    """Coerce *interpolated* to match the type of *reference* for scalar types.
+    """Coerce *interpolated* to match the type of *reference*.
 
-    Handles Python ``bool``, ``int``, and ``float`` precisely.  Array-like
-    values (e.g. numpy arrays) are returned as-is because element-wise
-    arithmetic already produces the correct type.  Non-numeric types (e.g.
-    strings, arbitrary objects) are also returned unchanged — they arise only
-    from the ``Step`` easing which returns the original value directly.
+    Handles Python ``bool``, ``int``, and ``float`` precisely.  For ``list``
+    and ``tuple`` values (including nested ones) the result is cast element-
+    wise back to the original container type using numpy for arithmetic.
+    numpy arrays and other array-like objects are returned as-is.  Non-numeric
+    types are also returned unchanged — they arise only from the ``Step``
+    easing which returns the original value directly.
     """
     # bool must be checked before int — bool is a subclass of int.
     if isinstance(reference, bool):
@@ -22,6 +25,12 @@ def _coerce_value(reference: Any, interpolated: Any) -> Any:
         return round(float(interpolated))
     if isinstance(reference, float):
         return float(interpolated)
+    # list / tuple (including nested): cast each element back recursively.
+    if isinstance(reference, (list, tuple)):
+        arr = np.asarray(interpolated)
+        if isinstance(reference, tuple):
+            return type(reference)([_coerce_value(r, v) for r, v in zip(reference, arr)])
+        return [_coerce_value(r, v) for r, v in zip(reference, arr)]
     # numpy arrays and other array-like / arbitrary types.
     return interpolated
 
