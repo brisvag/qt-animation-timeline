@@ -100,7 +100,7 @@ def build_demo() -> tuple[QWidget, AnimationTimelineWidget, Scene]:
 def main() -> None:
     """Run the demo application."""
     app = QApplication(sys.argv)
-    build_demo()
+    _widget, _timeline, _scene = build_demo()
     sys.exit(app.exec())
 
 
