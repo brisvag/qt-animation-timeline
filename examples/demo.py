@@ -108,9 +108,18 @@ def main() -> None:
     main_widget, timeline, scene = build_demo()
 
     # When running from IPython with %gui qt the event loop is already
-    # running, so app.exec() would block.  In that case, just return and
-    # let IPython keep the window alive.
-    if not hasattr(app, "_ipython_owns_loop"):
+    # running, so app.exec() would block.  Detect this by checking whether
+    # IPython has an active GUI event loop registered.
+    in_ipython_loop = False
+    try:
+        from IPython import get_ipython
+
+        ip = get_ipython()
+        in_ipython_loop = ip is not None and getattr(ip, "active_eventloop", None) is not None
+    except ImportError:
+        pass
+
+    if not in_ipython_loop:
         sys.exit(app.exec())
 
 
