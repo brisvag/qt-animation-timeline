@@ -28,6 +28,9 @@ _PLACEHOLDER_TRACK = "..."
 # Default frame width in pixels (used by reset-view).
 _DEFAULT_FRAME_WIDTH: float = 15.0
 
+# Multiplicative zoom factor per scroll step (Ctrl+wheel).
+_ZOOM_FACTOR: float = 1.15
+
 _DEFAULT_TRACK_COLORS = [
     QColor(255, 100, 100),
     QColor(100, 200, 100),
@@ -757,7 +760,7 @@ class AnimationTimelineWidget(QWidget):
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             # Multiplicative zoom keeps steps proportional at any zoom level.
             steps = event.angleDelta().y() / 120
-            factor = 1.15**steps
+            factor = _ZOOM_FACTOR**steps
             self.frame_width = max(
                 self.min_frame_width,
                 min(self.frame_width * factor, self.max_frame_width),
