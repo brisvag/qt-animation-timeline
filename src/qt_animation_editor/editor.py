@@ -1,6 +1,21 @@
-from qtpy.QtCore import QRectF, Qt
-from qtpy.QtGui import QColor, QFont, QKeyEvent, QPainter, QPen
+"""Animation timeline editor widget."""
+
+from __future__ import annotations
+
+from qtpy.QtCore import QPoint, QRect, QRectF, Qt, Signal
+from qtpy.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPen,
+    QWheelEvent,
+)
 from qtpy.QtWidgets import QApplication, QMenu, QScrollBar, QVBoxLayout, QWidget
+
+EASING_OPTIONS: list[str] = ["Linear", "Ease In", "Ease Out", "Ease In Out", "Constant"]
 
 _TRACK_COLORS = [
     QColor(255, 100, 100),
@@ -13,31 +28,67 @@ _TRACK_COLORS = [
 
 
 class Keyframe:
-    def __init__(self, t, value=0, easing="Linear"):
+    """A keyframe with a time position, value, and separate in/out easing curves."""
+
+    def __init__(
+        self,
+        t: int,
+        value: float = 0,
+        easing_in: str = "Linear",
+        easing_out: str = "Linear",
+    ) -> None:
         self.t = max(0, int(t))
         self.value = value
-        self.easing = easing
+        self.easing_in = easing_in
+        self.easing_out = easing_out
 
 
 class Track:
-    def __init__(self, name, color=None):
+    """A named animation track holding an ordered list of keyframes."""
+
+    def __init__(self, name: str, color: QColor | None = None) -> None:
         self.name = name
         self.color = color or QColor(180, 180, 180)
-        self.keyframes = []
+        self.keyframes: list[Keyframe] = []
 
-    def add_keyframe(self, t, value=0, easing="Linear"):
-        t = max(0, round(t))
+    def add_keyframe(
+        self,
+        t: int,
+        value: float = 0,
+        easing_in: str = "Linear",
+        easing_out: str = "Linear",
+    ) -> Keyframe:
+        """Add a keyframe at frame *t*, raising `KeyError` if one already exists."""
+        t = max(0, int(t))
         for kf in self.keyframes:
             if kf.t == t:
-                raise KeyError
-        kf = Keyframe(t, value, easing)
+                raise KeyError(f"keyframe at frame {t} already exists")
+        kf = Keyframe(t, value, easing_in, easing_out)
         self.keyframes.append(kf)
         self.keyframes.sort(key=lambda k: k.t)
         return kf
 
 
 class AnimationTimelineWidget(QWidget):
-    def __init__(self, parent=None):
+    """Interactive animation timeline widget."""
+
+    # Emitted when the playhead moves to a new frame.
+    playhead_moved = Signal(int)
+    # Emitted when a track is added or removed.
+    track_added = Signal(object)
+    track_removed = Signal(object)
+    # Emitted when a track is renamed via the context menu.
+    track_renamed = Signal(object)
+    # Emitted when a keyframe is created by the user.
+    keyframe_added = Signal(object, object)
+    # Emitted after one or more keyframes are deleted.
+    keyframes_removed = Signal(list)
+    # Emitted at the end of a keyframe drag operation.
+    keyframes_moved = Signal(list)
+    # Emitted when easing is changed via the context menu.
+    easing_changed = Signal(list)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
         self.bg_color = QColor(30, 30, 30)
@@ -45,84 +96,93 @@ class AnimationTimelineWidget(QWidget):
         self.time_line_color = QColor(180, 180, 180, 120)
         self.time_label_color = QColor(200, 200, 200)
         self.current_frame_color = QColor(255, 0, 0)
-
         self.add_button_color = QColor(80, 150, 80)
         self.remove_button_color = QColor(180, 80, 80)
+        self.rubber_band_fill = QColor(100, 150, 255, 50)
+        self.rubber_band_border = QColor(100, 150, 255, 200)
 
-        self.keyframe_size = 10
-        self.line_thickness = 2
+        self.keyframe_size: int = 10
+        self.line_thickness: int = 2
+        self.frame_width: float = 15
+        self.track_height: int = 40
+        self.left_margin: int = 120
+        self.top_margin: int = 40
+        self.min_frame_width: float = 2
+        self.max_frame_width: float = 50
 
-        self.frame_width = 15
-        self.track_height = 40
+        self.tracks: list[Track] = []
+        self.track_options: list[str] = [
+            "Location X",
+            "Location Y",
+            "Rotation",
+            "Scale",
+        ]
 
-        self.left_margin = 120
-        self.top_margin = 40
+        self.current_frame: int = 0
 
-        self.min_frame_width = 2
-        self.max_frame_width = 50
+        self.scroll_x: int = 0
+        self.scroll_y: int = 0
 
-        self.tracks = []
-        self.track_options = ["Location X", "Location Y", "Rotation", "Scale"]
+        self.selected_keyframes: list[Keyframe] = []
+        # Anchor keyframe used to compute deltas during a multi-keyframe drag.
+        self._drag_pivot: Keyframe | None = None
+        self._drag_offset: int = 0
+        self._dragging_keyframes: bool = False
 
-        self.current_frame = 0
+        self._scrubbing: bool = False
 
-        self.scroll_x = 0
-        self.scroll_y = 0
+        # Rubber-band box-selection state.
+        self._box_start: QPoint | None = None
+        self._box_rect: QRect | None = None
 
-        self.selected_keyframes = []
-        self.selected_keyframe = None
-        self.drag_offset = 0
-
-        self.scrubbing = False
-
-        self.h_scroll = QScrollBar(Qt.Horizontal, self)
-        self.v_scroll = QScrollBar(Qt.Vertical, self)
-
-        self.h_scroll.valueChanged.connect(self.on_hscroll)
-        self.v_scroll.valueChanged.connect(self.on_vscroll)
+        self.h_scroll = QScrollBar(Qt.Orientation.Horizontal, self)
+        self.v_scroll = QScrollBar(Qt.Orientation.Vertical, self)
+        self.h_scroll.valueChanged.connect(self._on_hscroll)
+        self.v_scroll.valueChanged.connect(self._on_vscroll)
 
         self.label_font = QFont("Arial", 10)
 
-        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-    # ------------------------------------------------
-
-    def frame_to_x(self, frame):
+    def frame_to_x(self, frame: int | float) -> float:
+        """Convert a frame number to a pixel x coordinate."""
         return self.left_margin + frame * self.frame_width - self.scroll_x
 
-    def x_to_frame(self, x):
+    def x_to_frame(self, x: float) -> int:
+        """Convert a pixel x coordinate to the nearest frame number."""
         return round((x - self.left_margin + self.scroll_x) / self.frame_width)
 
-    def y_to_track_index(self, y):
+    def y_to_track_index(self, y: float) -> int:
+        """Convert a pixel y coordinate to a track index (may be out of range)."""
         return int((y - self.top_margin + self.scroll_y) / self.track_height)
 
-    # ------------------------------------------------
+    def track_center_y(self, track_index: int) -> float:
+        """Return the pixel y coordinate of the vertical centre of a track row."""
+        return (
+            self.top_margin
+            + track_index * self.track_height
+            - self.scroll_y
+            + self.track_height / 2
+        )
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event) -> None:
         vsw = 20 if self.v_scroll.isVisible() else 0
-
         self.h_scroll.setGeometry(0, self.height() - 20, self.width() - vsw, 20)
-
         self.v_scroll.setGeometry(self.width() - 20, 0, 20, self.height() - 20)
-
         self.update_scrollbars()
 
-    def update_scrollbars(self):
+    def update_scrollbars(self) -> None:
+        """Recalculate scrollbar ranges based on content size."""
         max_frame = max((kf.t for t in self.tracks for kf in t.keyframes), default=0)
-
         content_width = (max_frame + 20) * self.frame_width
         page_w = self.width() - self.left_margin
-
         self.h_scroll.setMaximum(max(0, int(content_width - page_w)))
         self.h_scroll.setPageStep(int(page_w))
 
         total_tracks_height = len(self.tracks) * self.track_height
         page_h = self.height() - self.top_margin
-
         need_vscroll = total_tracks_height > page_h
-
         self.v_scroll.setVisible(need_vscroll)
-
         if need_vscroll:
             self.v_scroll.setMaximum(total_tracks_height - page_h)
             self.v_scroll.setPageStep(page_h)
@@ -130,17 +190,16 @@ class AnimationTimelineWidget(QWidget):
             self.scroll_y = 0
             self.v_scroll.setMaximum(0)
 
-    def on_hscroll(self, v):
+    def _on_hscroll(self, v: int) -> None:
         self.scroll_x = v
         self.update()
 
-    def on_vscroll(self, v):
+    def _on_vscroll(self, v: int) -> None:
         self.scroll_y = v
         self.update()
 
-    # ------------------------------------------------
-
-    def zoom_step(self):
+    def zoom_step(self) -> int:
+        """Return the frame-label interval appropriate for the current zoom level."""
         w = self.frame_width
         if w < 3:
             return 500
@@ -154,51 +213,16 @@ class AnimationTimelineWidget(QWidget):
             return 10
         return 1
 
-    # ------------------------------------------------
-
-    def paintEvent(self, event):
+    def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.fillRect(self.rect(), self.bg_color)
         painter.setFont(self.label_font)
-
         metrics = painter.fontMetrics()
 
-        # track backgrounds
-        for i, _track in enumerate(self.tracks):
-            y = self.top_margin + i * self.track_height - self.scroll_y
+        self._draw_track_backgrounds(painter)
+        self._draw_grid(painter, metrics)
 
-            painter.fillRect(
-                self.left_margin,
-                y,
-                self.width() - self.left_margin,
-                self.track_height,
-                self.track_bg_color,
-            )
-
-        # frame grid
-        step = self.zoom_step()
-
-        max_frame = int(
-            (self.width() + self.scroll_x - self.left_margin) / self.frame_width
-        )
-
-        for frame in range(0, max_frame + 1, step):
-            x = self.frame_to_x(frame)
-
-            if x < self.left_margin:
-                continue
-
-            painter.setPen(self.time_line_color)
-            painter.drawLine(int(x), self.top_margin, int(x), self.height())
-
-            painter.setPen(self.time_label_color)
-            painter.drawText(
-                int(x) - metrics.horizontalAdvance(str(frame)) // 2,
-                self.top_margin - 10,
-                str(frame),
-            )
-
-        # tracks (clipped so lines/keyframes never bleed into the label column)
+        # Clip track content to the right of the label column.
         painter.save()
         painter.setClipRect(
             self.left_margin,
@@ -208,195 +232,249 @@ class AnimationTimelineWidget(QWidget):
         )
         for i, track in enumerate(self.tracks):
             self.draw_track(painter, i, track)
+        if self._box_rect is not None:
+            self._draw_rubber_band(painter)
         painter.restore()
 
-        # labels
+        self._draw_labels(painter, metrics)
+        self._draw_add_button(painter)
+
+        # Playhead: only draw when it is to the right of the label column.
+        x = self.frame_to_x(self.current_frame)
+        if x >= self.left_margin:
+            painter.setPen(QPen(self.current_frame_color, 2))
+            painter.drawLine(int(x), self.top_margin, int(x), self.height())
+
+    def _draw_track_backgrounds(self, painter: QPainter) -> None:
+        for i in range(len(self.tracks)):
+            y = self.top_margin + i * self.track_height - self.scroll_y
+            painter.fillRect(
+                self.left_margin,
+                y,
+                self.width() - self.left_margin,
+                self.track_height,
+                self.track_bg_color,
+            )
+
+    def _draw_grid(self, painter: QPainter, metrics: QFontMetrics) -> None:
+        step = self.zoom_step()
+        max_frame = int(
+            (self.width() + self.scroll_x - self.left_margin) / self.frame_width
+        )
+        for frame in range(0, max_frame + 1, step):
+            x = self.frame_to_x(frame)
+            if x < self.left_margin:
+                continue
+            painter.setPen(self.time_line_color)
+            painter.drawLine(int(x), self.top_margin, int(x), self.height())
+            painter.setPen(self.time_label_color)
+            label = str(frame)
+            painter.drawText(
+                int(x) - metrics.horizontalAdvance(label) // 2,
+                self.top_margin - 10,
+                label,
+            )
+
+    def _draw_labels(self, painter: QPainter, metrics: QFontMetrics) -> None:
         for i, track in enumerate(self.tracks):
             y = self.top_margin + i * self.track_height - self.scroll_y
-
             if y < -self.track_height or y > self.height():
                 continue
 
             painter.setPen(track.color)
-
             painter.drawText(
                 40,
                 y + self.track_height // 2 + metrics.ascent() // 2,
                 track.name,
             )
 
-            bx = 8
-            by = y + (self.track_height - 14) // 2
-
+            bx, by = 8, y + (self.track_height - 14) // 2
             painter.setBrush(self.remove_button_color)
-            painter.setPen(Qt.NoPen)
+            painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRect(bx, by, 14, 14)
-
-            painter.setPen(Qt.black)
+            painter.setPen(Qt.GlobalColor.black)
             painter.drawText(bx + 4, by + 11, "-")
 
-        # add button — fills the full label-column width
+    def _draw_add_button(self, painter: QPainter) -> None:
+        """Draw the add-track (+) button, which fills the full label column."""
         ay = self.top_margin + len(self.tracks) * self.track_height - self.scroll_y
-
         painter.setBrush(self.add_button_color)
-        painter.setPen(Qt.NoPen)
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRect(0, ay, self.left_margin, self.track_height)
-
-        painter.setPen(Qt.black)
+        painter.setPen(Qt.GlobalColor.black)
         cx = self.left_margin // 2
         cy = ay + self.track_height // 2
         painter.drawLine(cx - 8, cy, cx + 8, cy)
         painter.drawLine(cx, cy - 8, cx, cy + 8)
 
-        # playhead
-        x = self.frame_to_x(self.current_frame)
+    def _draw_rubber_band(self, painter: QPainter) -> None:
+        assert self._box_rect is not None
+        painter.setBrush(self.rubber_band_fill)
+        painter.setPen(QPen(self.rubber_band_border, 1))
+        painter.drawRect(self._box_rect)
 
-        painter.setPen(QPen(self.current_frame_color, 2))
-        painter.drawLine(int(x), self.top_margin, int(x), self.height())
-
-    # ------------------------------------------------
-
-    def draw_track(self, painter, index, track):
-        y = self.top_margin + index * self.track_height - self.scroll_y
+    def draw_track(self, painter: QPainter, index: int, track: Track) -> None:
+        """Draw the connecting line and all keyframes for *track*."""
+        cy = int(self.track_center_y(index))
 
         if len(track.keyframes) >= 2:
             painter.setPen(QPen(track.color, self.line_thickness))
-
             for k1, k2 in zip(track.keyframes[:-1], track.keyframes[1:], strict=False):
                 painter.drawLine(
                     int(self.frame_to_x(k1.t)),
-                    y + self.track_height // 2,
+                    cy,
                     int(self.frame_to_x(k2.t)),
-                    y + self.track_height // 2,
+                    cy,
                 )
 
         for kf in track.keyframes:
             self.draw_keyframe(painter, index, track, kf)
 
-    def draw_keyframe(self, painter, track_index, track, kf):
+    def draw_keyframe(
+        self, painter: QPainter, track_index: int, track: Track, kf: Keyframe
+    ) -> None:
+        """Draw a single keyframe as a filled circle."""
         x = self.frame_to_x(kf.t)
-
-        y = (
-            self.top_margin
-            + track_index * self.track_height
-            - self.scroll_y
-            + self.track_height // 2
-        )
-
-        y -= self.keyframe_size // 2
-
+        y = self.track_center_y(track_index) - self.keyframe_size / 2
         color = (
             track.color if kf not in self.selected_keyframes else QColor(255, 255, 0)
         )
-
         painter.setBrush(color)
-        painter.setPen(Qt.NoPen)
-
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(
             QRectF(
-                x - self.keyframe_size // 2,
+                x - self.keyframe_size / 2,
                 y,
                 self.keyframe_size,
                 self.keyframe_size,
             )
         )
 
-    # ------------------------------------------------
-    # mouse
-    # ------------------------------------------------
-
-    def mousePressEvent(self, event):
-        if event.button() != Qt.LeftButton:
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
             return
 
-        playhead_x = self.frame_to_x(self.current_frame)
+        x, y = event.x(), event.y()
 
-        if abs(event.x() - playhead_x) < 6:
-            self.scrubbing = True
+        # Ruler area: click or drag here to scrub the playhead.
+        if y < self.top_margin:
+            self._scrubbing = True
+            self._set_playhead(max(0, self.x_to_frame(x)))
             return
 
-        x = event.x()
-        y = event.y()
-
-        # remove buttons
-        for i in range(len(self.tracks)):
-            ty = self.top_margin + i * self.track_height - self.scroll_y
-
-            if 8 <= x <= 22 and ty + 13 <= y <= ty + 27:
-                self.tracks.pop(i)
-                self.update_scrollbars()
-                self.update()
-                return
-
-        # add button — full label-column width
-        ay = self.top_margin + len(self.tracks) * self.track_height - self.scroll_y
-
-        if x < self.left_margin and ay <= y <= ay + self.track_height:
-            self.add_track()
+        # Label column: remove button and add button.
+        if x < self.left_margin:
+            self._handle_label_click(x, y)
             return
 
-        clicked = self.pos_to_keyframe(x, y)
-
-        if clicked:
-            if event.modifiers() & Qt.ControlModifier:
-                if clicked in self.selected_keyframes:
-                    self.selected_keyframes.remove(clicked)
-                else:
-                    self.selected_keyframes.append(clicked)
-            elif clicked not in self.selected_keyframes:
-                # Replace selection only when clicking an unselected keyframe;
-                # clicking an already-selected keyframe preserves the multi-selection
-                # so the whole group can be dragged.
-                self.selected_keyframes = [clicked]
-
-            self.selected_keyframe = clicked
-            self.drag_offset = self.x_to_frame(x) - clicked.t
-
-            self.update()
+        # Timeline content — keyframes take priority.
+        kf = self.pos_to_keyframe(x, y)
+        if kf is not None:
+            self._start_keyframe_drag(event, kf, x)
             return
 
+        # Empty content area: begin rubber-band selection.
         self.selected_keyframes.clear()
-        if x >= self.left_margin:
-            self.current_frame = max(0, self.x_to_frame(x))
-
+        self._box_start = QPoint(x, y)
+        self._box_rect = None
         self.update()
 
-    def mouseMoveEvent(self, event):
-        if self.scrubbing:
-            self.current_frame = max(0, self.x_to_frame(event.x()))
-            self.update()
+    def _handle_label_click(self, x: int, y: int) -> None:
+        """Handle a left-click inside the label column (remove/add buttons)."""
+        for i in range(len(self.tracks)):
+            ty = self.top_margin + i * self.track_height - self.scroll_y
+            if 8 <= x <= 22 and ty + 13 <= y <= ty + 27:
+                removed = self.tracks.pop(i)
+                self.update_scrollbars()
+                self.update()
+                self.track_removed.emit(removed)
+                return
+
+        ay = self.top_margin + len(self.tracks) * self.track_height - self.scroll_y
+        if ay <= y <= ay + self.track_height:
+            self.add_track()
+
+    def _start_keyframe_drag(self, event: QMouseEvent, kf: Keyframe, x: int) -> None:
+        """Set up drag state for the clicked keyframe."""
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            if kf in self.selected_keyframes:
+                self.selected_keyframes.remove(kf)
+            else:
+                self.selected_keyframes.append(kf)
+        elif kf not in self.selected_keyframes:
+            # Clicking an unselected keyframe replaces the selection;
+            # clicking an already-selected one preserves the multi-selection.
+            self.selected_keyframes = [kf]
+
+        self._drag_pivot = kf
+        self._drag_offset = self.x_to_frame(x) - kf.t
+        self._dragging_keyframes = False
+        self.update()
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        x, y = event.x(), event.y()
+
+        if self._scrubbing:
+            self._set_playhead(max(0, self.x_to_frame(x)))
             return
 
-        if not (self.selected_keyframes and self.selected_keyframe):
+        if self._drag_pivot is not None:
+            self._move_selected_keyframes(x)
+            self._dragging_keyframes = True
             return
 
-        frame = self.x_to_frame(event.x()) - self.drag_offset
-        frame = max(0, frame)
+        if self._box_start is not None:
+            self._update_box_select(QPoint(x, y))
 
-        delta = frame - self.selected_keyframe.t
-
+    def _move_selected_keyframes(self, x: int) -> None:
+        assert self._drag_pivot is not None
+        target = max(0, self.x_to_frame(x) - self._drag_offset)
+        delta = target - self._drag_pivot.t
+        if delta == 0:
+            return
         for kf in self.selected_keyframes:
             kf.t = max(0, kf.t + delta)
-
         for track in self.tracks:
             track.keyframes.sort(key=lambda k: k.t)
-
         self.update_scrollbars()
         self.update()
 
-    def mouseReleaseEvent(self, event):
-        self.selected_keyframe = None
-        self.scrubbing = False
+    def _update_box_select(self, current: QPoint) -> None:
+        assert self._box_start is not None
+        self._box_rect = QRect(self._box_start, current).normalized()
+        self.selected_keyframes = self._keyframes_in_rect(self._box_rect)
+        self.update()
 
-    def mouseDoubleClickEvent(self, event):
-        x = event.x()
-        y = event.y()
+    def _keyframes_in_rect(self, rect: QRect) -> list[Keyframe]:
+        """Return all keyframes whose centre point lies within *rect*."""
+        result = []
+        for i, track in enumerate(self.tracks):
+            cy = int(self.track_center_y(i))
+            for kf in track.keyframes:
+                cx = int(self.frame_to_x(kf.t))
+                if rect.contains(cx, cy):
+                    result.append(kf)
+        return result
 
-        if x < self.left_margin:
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._dragging_keyframes and self.selected_keyframes:
+            self.keyframes_moved.emit(list(self.selected_keyframes))
+
+        self._scrubbing = False
+        self._drag_pivot = None
+        self._dragging_keyframes = False
+        self._box_start = None
+        self._box_rect = None
+        self.update()
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        x, y = event.x(), event.y()
+
+        # Ignore double-clicks outside the timeline content area.
+        if x < self.left_margin or y < self.top_margin:
             return
 
         track_index = self.y_to_track_index(y)
-
         if not (0 <= track_index < len(self.tracks)):
             return
 
@@ -404,137 +482,128 @@ class AnimationTimelineWidget(QWidget):
         track = self.tracks[track_index]
 
         try:
-            track.add_keyframe(frame)
+            kf = track.add_keyframe(frame)
         except KeyError:
-            # A keyframe already exists at this frame; silently ignore the duplicate.
-            pass
+            return
 
         self.update_scrollbars()
         self.update()
+        self.keyframe_added.emit(track, kf)
 
-    # ------------------------------------------------
-
-    def contextMenuEvent(self, event):
-        x = event.pos().x()
-        y = event.pos().y()
-
-        if x >= self.left_margin:
-            # Right-click on a keyframe → easing picker
-            kf = self.pos_to_keyframe(x, y)
-            if kf is None:
-                return
-
-            targets = self.selected_keyframes if kf in self.selected_keyframes else [kf]
-
-            menu = QMenu(self)
-            for easing in ["Linear", "Ease In", "Ease Out", "Ease In Out", "Constant"]:
-                action = menu.addAction(easing)
-                action.setCheckable(True)
-                action.setChecked(all(k.easing == easing for k in targets))
-
-                def _make_easing_setter(e, t):
-                    def _set(checked):
-                        for k in t:
-                            k.easing = e
-                        self.update()
-
-                    return _set
-
-                action.triggered.connect(_make_easing_setter(easing, list(targets)))
-            menu.exec(event.globalPos())
-        else:
-            # Right-click in the label area → track-option rename picker
-            track_index = self.y_to_track_index(y)
-            if not (0 <= track_index < len(self.tracks)):
-                return
-
-            track = self.tracks[track_index]
-            menu = QMenu(self)
-            for option in self.track_options:
-                action = menu.addAction(option)
-                action.setCheckable(True)
-                action.setChecked(track.name == option)
-
-                def _make_rename(t, n):
-                    def _rename(checked):
-                        t.name = n
-                        self.update()
-
-                    return _rename
-
-                action.triggered.connect(_make_rename(track, option))
-            menu.exec(event.globalPos())
-
-    def pos_to_keyframe(self, x, y):
+    def pos_to_keyframe(self, x: float, y: float) -> Keyframe | None:
+        """Return the keyframe at screen position *(x, y)*, or ``None``."""
         track_index = self.y_to_track_index(y)
-
         if not (0 <= track_index < len(self.tracks)):
             return None
-
         track = self.tracks[track_index]
-
-        y_center = (
-            self.top_margin
-            + track_index * self.track_height
-            - self.scroll_y
-            + self.track_height // 2
-        )
-
+        cy = self.track_center_y(track_index)
         for kf in track.keyframes:
-            x_kf = self.frame_to_x(kf.t)
-
-            if (
-                abs(x_kf - x) <= self.keyframe_size
-                and abs(y_center - y) <= self.keyframe_size
-            ):
+            kx = self.frame_to_x(kf.t)
+            if abs(kx - x) <= self.keyframe_size and abs(cy - y) <= self.keyframe_size:
                 return kf
-
         return None
 
-    # ------------------------------------------------
+    def contextMenuEvent(self, event) -> None:
+        x, y = event.pos().x(), event.pos().y()
+        if x >= self.left_margin:
+            self._show_easing_menu(x, y, event.globalPos())
+        else:
+            self._show_track_rename_menu(y, event.globalPos())
 
-    def wheelEvent(self, event):
-        if event.modifiers() & Qt.ControlModifier:
+    def _show_easing_menu(self, x: int, y: int, global_pos: object) -> None:
+        """Show a context menu with separate Easing In / Easing Out sub-menus."""
+        kf = self.pos_to_keyframe(x, y)
+        if kf is None:
+            return
+
+        targets = self.selected_keyframes if kf in self.selected_keyframes else [kf]
+        menu = QMenu(self)
+
+        def _add_submenu(title: str, attr: str) -> None:
+            submenu = menu.addMenu(title)
+            for easing in EASING_OPTIONS:
+                action = submenu.addAction(easing)
+                action.setCheckable(True)
+                action.setChecked(all(getattr(k, attr) == easing for k in targets))
+
+                def _set(checked: bool, _e: str = easing, _a: str = attr) -> None:
+                    for k in targets:
+                        setattr(k, _a, _e)
+                    self.update()
+                    self.easing_changed.emit(list(targets))
+
+                action.triggered.connect(_set)
+
+        _add_submenu("Easing In", "easing_in")
+        _add_submenu("Easing Out", "easing_out")
+        menu.exec(global_pos)
+
+    def _show_track_rename_menu(self, y: int, global_pos: object) -> None:
+        """Show a context menu for renaming a track to one of the allowed options."""
+        track_index = self.y_to_track_index(y)
+        if not (0 <= track_index < len(self.tracks)):
+            return
+
+        track = self.tracks[track_index]
+        menu = QMenu(self)
+        for option in self.track_options:
+            action = menu.addAction(option)
+            action.setCheckable(True)
+            action.setChecked(track.name == option)
+
+            def _rename(checked: bool, _t: Track = track, _n: str = option) -> None:
+                _t.name = _n
+                self.update()
+                self.track_renamed.emit(_t)
+
+            action.triggered.connect(_rename)
+        menu.exec(global_pos)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             delta = event.angleDelta().y() / 120
-            self.frame_width += delta * 2
-
             self.frame_width = max(
                 self.min_frame_width,
-                min(self.frame_width, self.max_frame_width),
+                min(self.frame_width + delta * 2, self.max_frame_width),
             )
-
             self.update_scrollbars()
             self.update()
             return
 
         self.scroll_x -= event.angleDelta().y()
-
         self.scroll_x = max(0, min(self.scroll_x, self.h_scroll.maximum()))
         self.h_scroll.setValue(self.scroll_x)
-
         self.update()
 
-    # ------------------------------------------------
-
-    def keyPressEvent(self, event: QKeyEvent):
-        if event.key() == Qt.Key_Delete:
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Delete:
+            removed = list(self.selected_keyframes)
             for track in self.tracks:
                 track.keyframes = [
                     kf for kf in track.keyframes if kf not in self.selected_keyframes
                 ]
-
             self.selected_keyframes.clear()
-
             self.update_scrollbars()
             self.update()
+            if removed:
+                self.keyframes_removed.emit(removed)
 
-    # ------------------------------------------------
+    def _set_playhead(self, frame: int) -> None:
+        """Move the playhead to *frame* and emit ``playhead_moved`` if it changed."""
+        if frame != self.current_frame:
+            self.current_frame = frame
+            self.playhead_moved.emit(frame)
+        self.update()
 
-    def add_track(self, name=None):
+    def add_track(self, name: str | None = None) -> Track:
+        """Add a new track with an auto-assigned colour and return it."""
         color = _TRACK_COLORS[len(self.tracks) % len(_TRACK_COLORS)]
-        self.tracks.append(Track(name or self.track_options[0], color))
+        track = Track(name or self.track_options[0], color)
+        self.tracks.append(track)
         self.update_scrollbars()
         self.update()
+        self.track_added.emit(track)
+        return track
 
 
 if __name__ == "__main__":
