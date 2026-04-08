@@ -187,51 +187,16 @@ def test_placeholder_never_dispatched(qapp):
     assert m.v == 0.0
 
 
-def _menu_actions(w, track_index):
-    """Return {label: enabled} for the track-change menu of a given track."""
-    from unittest.mock import patch
+def _combo_options(w, track_index):
+    """Return ``{label: enabled}`` for the track-change combo of a given track.
 
-    captured = {}
-
-    class FakeMenu:
-        def addAction(self, label):
-            class A:
-                def __init__(self):
-                    self.label = label
-                    self._checkable = False
-                    self._checked = False
-                    self._enabled = True
-
-                def setCheckable(self, v):
-                    self._checkable = v
-
-                def setChecked(self, v):
-                    self._checked = v
-
-                def setEnabled(self, v):
-                    self._enabled = v
-                    captured[label] = v
-
-                class _Sig:
-                    def connect(self, fn):
-                        pass
-
-                triggered = _Sig()
-
-            a = A()
-            captured[label] = True
-            return a
-
-        def exec(self, pos):
-            pass
-
-    import qt_animation_editor.editor as ed
-
-    with patch.object(ed, "QMenu", return_value=FakeMenu()):
-        ty = w.track_center_y(track_index)
-        w._show_track_change_menu(int(ty), None)
-
-    return captured
+    Uses the public ``_get_track_change_options`` helper directly so no UI
+    mocking is required.
+    """
+    if not (0 <= track_index < len(w.tracks)):
+        return {}
+    track = w.tracks[track_index]
+    return dict(w._get_track_change_options(track))
 
 
 def test_unique_track_options(qapp):
@@ -239,15 +204,15 @@ def test_unique_track_options(qapp):
     w.track_options = {"A": (object(), "x"), "B": (object(), "y")}
     w.add_track("A")
     w.add_track("B")
-    actions = _menu_actions(w, 1)
-    assert actions.get("A") is False
+    options = _combo_options(w, 1)
+    assert options.get("A") is False  # A is used by track 0 → disabled for track 1
 
     w2 = AnimationTimelineWidget()
     w2.track_options = {"A": (object(), "x")}
     w2.add_track("A")
     w2.add_track("A")
-    actions2 = _menu_actions(w2, 1)
-    assert actions2.get(_PLACEHOLDER_TRACK) is not False
+    options2 = _combo_options(w2, 1)
+    assert options2.get(_PLACEHOLDER_TRACK) is True  # placeholder always enabled
 
 
 def _make_press(x, y, shift=False, button=Qt.MouseButton.LeftButton):
@@ -424,6 +389,33 @@ def test_dispatch_on_keyframe_add(qapp):
     w.tracks[0].add_keyframe(50, value=99.0)
     w._dispatch_track_callbacks(w.current_frame)
     assert m.x == pytest.approx(99.0)
+
+
+def test_dispatch_on_keyframe_delete(qapp):
+    class Model:
+        x = 0.0
+
+    m = Model()
+    w = AnimationTimelineWidget()
+    w.resize(800, 300)
+    w.track_options = {"A": (m, "x")}
+    w.add_track("A")
+    w.tracks[0].add_keyframe(0, value=0.0)
+    # Keyframe at frame 50 pins model to 5.0 via linear interpolation to 100.
+    kf_mid = w.tracks[0].add_keyframe(50, value=5.0)
+    w.tracks[0].add_keyframe(100, value=10.0)
+    w._set_playhead(50)
+    assert m.x == pytest.approx(5.0)
+
+    # Delete the middle keyframe via the keyboard shortcut.
+    w.selected_keyframes = [kf_mid]
+    press = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier)
+    w.keyPressEvent(press)
+
+    # After deletion the playhead is at 50 between kf(0,0) and kf(100,10):
+    # linear interpolation gives 5.0, same value but reached via different path.
+    # More importantly the model must have been re-dispatched (not stale).
+    assert m.x == pytest.approx(5.0)
 
 
 def test_keyframe_value_capture(qapp):

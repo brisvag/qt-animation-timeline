@@ -17,8 +17,9 @@ from qtpy.QtGui import (
     QPen,
     QWheelEvent,
 )
-from qtpy.QtWidgets import QMenu, QScrollBar, QToolTip, QWidget
 from qtpy.QtSvg import QSvgRenderer
+from qtpy.QtWidgets import QMenu, QScrollBar, QToolTip, QVBoxLayout, QWidget
+from superqt import QSearchableComboBox
 
 from qt_animation_editor.easing import EasingFunction, _coerce_value
 from qt_animation_editor.models import Keyframe, Track
@@ -68,7 +69,11 @@ _PLAY_NORMAL = 0
 _PLAY_LOOP = 1
 _PLAY_PINGPONG = 2
 # Icon keys (into _BUTTON_ICONS) for each play mode shown on the mode-toggle button.
-_PLAY_MODE_ICONS = {_PLAY_NORMAL: "play_once", _PLAY_LOOP: "loop", _PLAY_PINGPONG: "pingpong"}
+_PLAY_MODE_ICONS = {
+    _PLAY_NORMAL: "play_once",
+    _PLAY_LOOP: "loop",
+    _PLAY_PINGPONG: "pingpong",
+}
 
 # SVG path data (Material Design, viewBox "0 0 24 24") for every button icon.
 # Paths are filled shapes — colour is injected at render time via _render_svg_icon.
@@ -789,8 +794,24 @@ class AnimationTimelineWidget(QWidget):
 
         menu.exec(global_pos)
 
+    def _get_track_change_options(self, track: Track) -> list[tuple[str, bool]]:
+        """Return ``(option_name, is_enabled)`` pairs for the track-change picker.
+
+        The ``...`` placeholder is always enabled.  Named options already used
+        by *other* tracks are disabled to enforce uniqueness.
+        """
+        used_by_others = {
+            t.name
+            for t in self.tracks
+            if t is not track and t.name != _PLACEHOLDER_TRACK
+        }
+        return [
+            (opt, opt == _PLACEHOLDER_TRACK or opt not in used_by_others)
+            for opt in [_PLACEHOLDER_TRACK, *self.track_options]
+        ]
+
     def _show_track_change_menu(self, y: int, global_pos: object) -> None:
-        """Show a context menu for changing a track to one of the configured options.
+        """Show a searchable combo-box for changing a track to one of the configured options.
 
         The ``...`` placeholder is always available.  Named options that are
         already used by *other* tracks are shown but disabled to enforce
@@ -801,27 +822,45 @@ class AnimationTimelineWidget(QWidget):
             return
 
         track = self.tracks[track_index]
-        used_by_others = {
-            t.name
-            for t in self.tracks
-            if t is not track and t.name != _PLACEHOLDER_TRACK
-        }
+        options = self._get_track_change_options(track)
 
-        menu = QMenu(self)
-        for option in [_PLACEHOLDER_TRACK, *self.track_options]:
-            action = menu.addAction(option)
-            action.setCheckable(True)
-            action.setChecked(track.name == option)
-            if option != _PLACEHOLDER_TRACK and option in used_by_others:
-                action.setEnabled(False)
+        # Float a frameless popup containing a searchable combo-box.
+        container = QWidget(None, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        container.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(0)
 
-            def _change(checked: bool, _t: Track = track, _n: str = option) -> None:
-                _t.name = _n
-                self.update()
-                self.track_changed.emit(_t)
+        combo = QSearchableComboBox(container)
+        for option, enabled in options:
+            combo.addItem(option)
+            if not enabled:
+                item = combo.model().item(combo.model().rowCount() - 1)
+                if item is not None:
+                    item.setEnabled(False)
 
-            action.triggered.connect(_change)
-        menu.exec(global_pos)
+        try:
+            current_names = [opt for opt, _ in options]
+            combo.setCurrentIndex(current_names.index(track.name))
+        except ValueError:
+            combo.setCurrentIndex(0)
+
+        layout.addWidget(combo)
+        container.adjustSize()
+        if global_pos is not None:
+            container.move(global_pos)
+        container.show()
+
+        def _apply(idx: int) -> None:
+            model_item = combo.model().item(idx)
+            if model_item is not None and not model_item.isEnabled():
+                return
+            track.name = combo.itemText(idx)
+            self.update()
+            self.track_changed.emit(track)
+            container.close()
+
+        combo.activated.connect(_apply)
 
     def _scroll_x_for_zoom(self, mouse_x: int, old_fw: float, new_fw: float) -> int:
         """Compute the ``scroll_x`` that keeps the frame under *mouse_x* fixed.
@@ -878,6 +917,9 @@ class AnimationTimelineWidget(QWidget):
             self.update()
             if removed:
                 self.keyframes_removed.emit(removed)
+                # Deleting a keyframe may change the interpolated value at the
+                # current playhead position — keep the model in sync.
+                self._dispatch_track_callbacks(self.current_frame)
         elif event.key() == Qt.Key.Key_Space:
             self._toggle_playback()
         elif event.key() == Qt.Key.Key_Left:
