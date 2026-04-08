@@ -697,9 +697,7 @@ def test_loop_btn_color_distinct(qapp):
 
 
 def test_forward_only_icon_is_arrow():
-    icon = _PLAY_MODE_ICONS[_PLAY_NORMAL]
-    assert icon not in ("▷", "▶", "⏵"), f"Expected right-arrow icon, got play symbol {icon!r}"
-    assert icon == "→"
+    assert _PLAY_MODE_ICONS[_PLAY_NORMAL] == "→"
 
 
 def test_playback_speed(qapp):
