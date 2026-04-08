@@ -764,3 +764,115 @@ class TestDoubleClickButton:
         )
         w.mouseDoubleClickEvent(event)
         assert len(w.tracks[0].keyframes) == 0  # no keyframe created
+
+
+# ---------------------------------------------------------------------------
+# left_timeline_pad — coordinate round-trip still holds
+# ---------------------------------------------------------------------------
+
+
+class TestTimelinePad:
+    def test_coordinate_roundtrip_with_pad(self, qapp):
+        w = AnimationTimelineWidget()
+        assert w.left_timeline_pad > 0
+        for frame in [0, 1, 50, 300]:
+            assert w.x_to_frame(w.frame_to_x(frame)) == frame
+
+    def test_frame_zero_x_greater_than_left_margin(self, qapp):
+        """frame_to_x(0) must be to the right of the label column."""
+        w = AnimationTimelineWidget()
+        assert w.frame_to_x(0) > w.left_margin
+
+
+# ---------------------------------------------------------------------------
+# _is_on_track_line
+# ---------------------------------------------------------------------------
+
+
+class TestIsOnTrackLine:
+    def test_on_center_returns_true(self, qapp):
+        w = AnimationTimelineWidget()
+        w.resize(800, 300)
+        w.add_track("A")
+        cy = w.track_center_y(0)
+        x = int(w.frame_to_x(10))
+        assert w._is_on_track_line(x, int(cy)) is True
+
+    def test_far_from_center_returns_false(self, qapp):
+        w = AnimationTimelineWidget()
+        w.resize(800, 300)
+        w.add_track("A")
+        cy = w.track_center_y(0)
+        x = int(w.frame_to_x(10))
+        # Use the full track row height as offset — clearly outside the line.
+        assert w._is_on_track_line(x, int(cy) + w.track_height) is False
+
+    def test_within_tolerance_returns_true(self, qapp):
+        w = AnimationTimelineWidget()
+        w.resize(800, 300)
+        w.add_track("A")
+        cy = w.track_center_y(0)
+        x = int(w.frame_to_x(10))
+        tolerance = w.line_thickness + 4
+        assert w._is_on_track_line(x, int(cy) + tolerance) is True
+
+    def test_no_tracks_returns_false(self, qapp):
+        w = AnimationTimelineWidget()
+        w.resize(800, 300)
+        assert w._is_on_track_line(200, 60) is False
+
+
+# ---------------------------------------------------------------------------
+# _reset_view fits content
+# ---------------------------------------------------------------------------
+
+
+class TestResetViewFitsContent:
+    def test_reset_with_keyframes_computes_zoom(self, qapp):
+        w = AnimationTimelineWidget()
+        w.resize(800, 300)
+        w.add_track("A")
+        w.tracks[0].add_keyframe(0, value=0.0)
+        w.tracks[0].add_keyframe(200, value=1.0)
+        w._reset_view()
+        # After reset: scroll is at origin.
+        assert w.scroll_x == 0
+        # frame_to_x(0) should be at left_margin + left_timeline_pad.
+        assert w.frame_to_x(0) == pytest.approx(w.left_margin + w.left_timeline_pad)
+        # Last keyframe should be within the visible viewport.
+        last_x = w.frame_to_x(200)
+        assert last_x < w.width()
+
+    def test_reset_with_no_keyframes_uses_fallback(self, qapp):
+        w = AnimationTimelineWidget()
+        w.resize(800, 300)
+        w._reset_view()
+        assert w.scroll_x == 0
+        assert w.frame_width > 0
+
+
+# ---------------------------------------------------------------------------
+# Default track colors — colorblind-friendly palette
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultColors:
+    def test_seven_default_colors(self, qapp):
+        from qt_animation_editor.editor import _DEFAULT_TRACK_COLORS
+
+        assert len(_DEFAULT_TRACK_COLORS) == 7
+
+    def test_colors_are_valid(self, qapp):
+        from qt_animation_editor.editor import _DEFAULT_TRACK_COLORS
+
+        for c in _DEFAULT_TRACK_COLORS:
+            assert c.isValid()
+
+    def test_blue_is_first(self, qapp):
+        """First color should be the Okabe-Ito blue."""
+        from qt_animation_editor.editor import _DEFAULT_TRACK_COLORS
+
+        c = _DEFAULT_TRACK_COLORS[0]
+        assert c.red() == 0
+        assert c.green() == 114
+        assert c.blue() == 178

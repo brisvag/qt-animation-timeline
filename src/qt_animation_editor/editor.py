@@ -31,13 +31,15 @@ _DEFAULT_FRAME_WIDTH: float = 15.0
 # Multiplicative zoom factor per scroll step (Ctrl+wheel).
 _ZOOM_FACTOR: float = 1.15
 
+# Okabe-Ito colorblind-friendly palette (seven distinguishable colors).
 _DEFAULT_TRACK_COLORS = [
-    QColor(255, 100, 100),
-    QColor(100, 200, 100),
-    QColor(100, 150, 255),
-    QColor(255, 200, 80),
-    QColor(200, 100, 255),
-    QColor(80, 220, 200),
+    QColor(0, 114, 178),  # blue
+    QColor(230, 159, 0),  # orange
+    QColor(0, 158, 115),  # bluish green
+    QColor(86, 180, 233),  # sky blue
+    QColor(213, 94, 0),  # vermilion
+    QColor(240, 228, 66),  # yellow
+    QColor(204, 121, 167),  # reddish purple
 ]
 
 
@@ -77,11 +79,14 @@ class AnimationTimelineWidget(QWidget):
         self.play_btn_color = QColor(60, 80, 60)
         self.play_btn_text_color = QColor(180, 220, 180)
 
-        self.keyframe_size: int = 10
-        self.line_thickness: int = 2
+        self.keyframe_size: int = 14
+        self.line_thickness: int = 3
         self.frame_width: float = _DEFAULT_FRAME_WIDTH
-        self.track_height: int = 40
+        self.track_height: int = 28
         self.left_margin: int = 120
+        # Extra pixel space to the left of frame 0 so the "0" label is never
+        # clipped by the label column when scrolled to the origin.
+        self.left_timeline_pad: int = 20
         self.top_margin: int = 40
         # Allow near-infinite zoom out; zoom_step() adapts via magnitude.
         self.min_frame_width: float = 0.05
@@ -131,6 +136,8 @@ class AnimationTimelineWidget(QWidget):
         self.v_scroll.valueChanged.connect(self._on_vscroll)
 
         self.label_font = QFont("Arial", 10)
+        # Larger font used exclusively for the ⌂ / ▶ / ⏸ control-button glyphs.
+        self.control_font = QFont("Arial", 18)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         # Enable hover events for keyframe value tooltips.
@@ -142,11 +149,15 @@ class AnimationTimelineWidget(QWidget):
 
     def frame_to_x(self, frame: int | float) -> float:
         """Convert a frame number to a pixel x coordinate."""
-        return self.left_margin + frame * self.frame_width - self.scroll_x
+        offset = self.left_margin + self.left_timeline_pad
+        return offset + frame * self.frame_width - self.scroll_x
 
     def x_to_frame(self, x: float) -> int:
         """Convert a pixel x coordinate to the nearest frame number."""
-        return round((x - self.left_margin + self.scroll_x) / self.frame_width)
+        return round(
+            (x - self.left_margin - self.left_timeline_pad + self.scroll_x)
+            / self.frame_width
+        )
 
     def y_to_track_index(self, y: float) -> int:
         """Convert a pixel y coordinate to a track index (may be out of range)."""
@@ -174,7 +185,7 @@ class AnimationTimelineWidget(QWidget):
     def update_scrollbars(self) -> None:
         """Recalculate scrollbar ranges based on content size."""
         max_frame = max((kf.t for t in self.tracks for kf in t.keyframes), default=0)
-        content_width = (max_frame + 20) * self.frame_width
+        content_width = self.left_timeline_pad + (max_frame + 20) * self.frame_width
         page_w = self.width() - self.left_margin
         self.h_scroll.setMaximum(max(0, int(content_width - page_w)))
         self.h_scroll.setPageStep(int(page_w))
@@ -355,6 +366,8 @@ class AnimationTimelineWidget(QWidget):
         btn_w = self.left_margin // 2
         h = self.top_margin
 
+        painter.setFont(self.control_font)
+
         # Reset / home button (left half).
         painter.fillRect(0, 0, btn_w, h, self.control_btn_color)
         painter.setPen(self.control_btn_text_color)
@@ -372,6 +385,9 @@ class AnimationTimelineWidget(QWidget):
             Qt.AlignmentFlag.AlignCenter,
             "\u23f8" if self._playing else "\u25b6",  # ⏸ / ▶
         )
+
+        # Restore the label font so subsequent drawing is unaffected.
+        painter.setFont(self.label_font)
 
     def _draw_rubber_band(self, painter: QPainter) -> None:
         assert self._box_rect is not None
@@ -565,13 +581,19 @@ class AnimationTimelineWidget(QWidget):
         self.update()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        # Only left double-click creates keyframes; ignore right-click.
+        # Only left double-click is handled; ignore right-click.
         if event.button() != Qt.MouseButton.LeftButton:
             return
 
         x, y = event.x(), event.y()
 
-        # Ignore double-clicks outside the timeline content area.
+        # Double-click on the top-left control area counts as a second click
+        # (e.g. double-clicking the play button toggles playback again).
+        if y < self.top_margin and x < self.left_margin:
+            self._handle_control_click(x, y)
+            return
+
+        # Ignore double-clicks in the ruler strip or label column.
         if x < self.left_margin or y < self.top_margin:
             return
 
@@ -670,15 +692,31 @@ class AnimationTimelineWidget(QWidget):
             return [ef for ef in self.easing_options if ef is EasingFunction.Step]
         return self.easing_options
 
+    def _is_on_track_line(self, x: int, y: int) -> bool:
+        """Return ``True`` if *(x, y)* is vertically close to a track centre line.
+
+        Only pixels within ``line_thickness + 4`` of the track's horizontal
+        connecting line qualify.  This is used to restrict the right-click
+        easing menu to actual track content rather than empty row space.
+        """
+        track_index = self.y_to_track_index(y)
+        if not (0 <= track_index < len(self.tracks)):
+            return False
+        cy = self.track_center_y(track_index)
+        return abs(y - cy) <= self.line_thickness + 4
+
     def _show_easing_menu(self, x: int, y: int, global_pos: object) -> None:
         """Show easing options for the segment under the cursor.
 
-        The target keyframe is found by first checking for a direct hit on a
-        keyframe diamond, then by segment lookup so that clicking anywhere on
-        a track row between (or after) keyframes also works.
+        Only opens when the click lands directly on a keyframe diamond or
+        within ``line_thickness + 4`` pixels of a track's centre line.
+        Clicking in empty space between tracks does nothing.
         """
         kf = self.pos_to_keyframe(x, y)
         if kf is None:
+            # Only fall back to segment lookup when on the actual track line.
+            if not self._is_on_track_line(x, y):
+                return
             kf = self._segment_left_keyframe_at(x, y)
         if kf is None:
             return
@@ -686,9 +724,7 @@ class AnimationTimelineWidget(QWidget):
         # Determine allowed easings based on the field type of this track.
         track_index = self.y_to_track_index(y)
         track = (
-            self.tracks[track_index]
-            if 0 <= track_index < len(self.tracks)
-            else None
+            self.tracks[track_index] if 0 <= track_index < len(self.tracks) else None
         )
         allowed = (
             self._get_allowed_easings_for_track(track)
@@ -742,9 +778,7 @@ class AnimationTimelineWidget(QWidget):
             if option != _PLACEHOLDER_TRACK and option in used_by_others:
                 action.setEnabled(False)
 
-            def _change(
-                checked: bool, _t: Track = track, _n: str = option
-            ) -> None:
+            def _change(checked: bool, _t: Track = track, _n: str = option) -> None:
                 _t.name = _n
                 self.update()
                 self.track_changed.emit(_t)
@@ -758,14 +792,33 @@ class AnimationTimelineWidget(QWidget):
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            # Multiplicative zoom keeps steps proportional at any zoom level.
             steps = event.angleDelta().y() / 120
             factor = _ZOOM_FACTOR**steps
-            self.frame_width = max(
+            old_fw = self.frame_width
+            new_fw = max(
                 self.min_frame_width,
-                min(self.frame_width * factor, self.max_frame_width),
+                min(old_fw * factor, self.max_frame_width),
             )
+            if new_fw == old_fw:
+                return
+            # Keep the frame that is currently under the mouse cursor at the
+            # same screen x position after the zoom is applied.
+            mouse_x = event.x()
+            frame_at_mouse = (
+                mouse_x - self.left_margin - self.left_timeline_pad + self.scroll_x
+            ) / old_fw
+            new_scroll_x = int(
+                self.left_margin
+                + self.left_timeline_pad
+                + frame_at_mouse * new_fw
+                - mouse_x
+            )
+            self.frame_width = new_fw
+            self.scroll_x = max(0, new_scroll_x)
             self.update_scrollbars()
+            self.h_scroll.blockSignals(True)
+            self.h_scroll.setValue(self.scroll_x)
+            self.h_scroll.blockSignals(False)
             self.update()
             return
 
@@ -819,11 +872,28 @@ class AnimationTimelineWidget(QWidget):
     # ------------------------------------------------------------------ #
 
     def _reset_view(self) -> None:
-        """Scroll to the origin and restore the default zoom level."""
+        """Fit the entire keyframe range in the viewport and scroll to the origin.
+
+        The zoom level is chosen so that all keyframes from frame 0 to the last
+        keyframe (plus a 10 % buffer, minimum 10 frames) fill the available
+        timeline width.  Falls back to the default zoom when there are no
+        keyframes or the widget has no width yet.
+        """
+        max_frame = max((kf.t for t in self.tracks for kf in t.keyframes), default=100)
+        buffer = max(10, max_frame // 10)
+        total_frames = max_frame + buffer
+        available = self.width() - self.left_margin - self.left_timeline_pad
+        if available > 0 and total_frames > 0:
+            new_fw = available / total_frames
+            new_fw = max(self.min_frame_width, min(new_fw, self.max_frame_width))
+        else:
+            new_fw = _DEFAULT_FRAME_WIDTH
+        self.frame_width = new_fw
         self.scroll_x = 0
         self.scroll_y = 0
-        self.frame_width = _DEFAULT_FRAME_WIDTH
+        self.h_scroll.blockSignals(True)
         self.h_scroll.setValue(0)
+        self.h_scroll.blockSignals(False)
         self.v_scroll.setValue(0)
         self.update_scrollbars()
         self.update()

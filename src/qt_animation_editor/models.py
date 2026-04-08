@@ -62,7 +62,7 @@ class Track:
         t = max(0, int(t))
         for kf in self.keyframes:
             if kf.t == t:
-                msg = f"keyframe at frame {t} already exists in track \"{self.name}\""
+                msg = f'keyframe at frame {t} already exists in track "{self.name}"'
                 raise KeyError(msg)
         kf = Keyframe(t, value, easing)
         self.keyframes.append(kf)

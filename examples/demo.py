@@ -4,14 +4,16 @@ Run with::
 
     python examples/demo.py
 
-The demo creates a simple ``Scene`` model whose fields are bound to three
-tracks.  Moving the playhead prints the current field values to stdout.
+The demo creates a ``Scene`` model whose fields are bound to four tracks.
+Moving the playhead prints the current field values to stdout.
+Requires NumPy (``pip install numpy``).
 """
 
 from __future__ import annotations
 
 import sys
 
+import numpy as np
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
@@ -26,6 +28,7 @@ class Scene:
         self.x: float = 0.0
         self.y: float = 0.0
         self.visible: bool = True
+        self.angles: np.ndarray = np.array([0.0, 0.0, 0.0])
 
 
 def main() -> None:
@@ -39,16 +42,17 @@ def main() -> None:
         "x": (scene, "x"),
         "y": (scene, "y"),
         "visible": (scene, "visible"),
+        "angles": (scene, "angles"),
     }
 
     # Add tracks pre-bound to the model fields.
     timeline.add_track("x")
     timeline.add_track("y")
     timeline.add_track("visible")
+    timeline.add_track("angles")
 
-    # Keyframe values are set explicitly here; in real usage double-clicking
-    # captures the live field value from the model.
-    timeline.tracks[0].add_keyframe(0, value=0.0)
+    # "x" starts at frame 20 (not 0) to demonstrate non-zero origins.
+    timeline.tracks[0].add_keyframe(20, value=50.0)
     timeline.tracks[0].add_keyframe(100, value=200.0)
     timeline.tracks[0].add_keyframe(200, value=50.0)
 
@@ -56,19 +60,27 @@ def main() -> None:
     timeline.tracks[1].add_keyframe(150, value=100.0, easing=EasingFunction.Step)
     timeline.tracks[1].add_keyframe(300, value=0.0)
 
-    timeline.tracks[2].add_keyframe(0, value=1.0, easing=EasingFunction.Step)
-    timeline.tracks[2].add_keyframe(120, value=0.0)
-    timeline.tracks[2].add_keyframe(240, value=1.0)
+    # "visible" uses actual bool values so Step easing works type-safely.
+    timeline.tracks[2].add_keyframe(0, value=True, easing=EasingFunction.Step)
+    timeline.tracks[2].add_keyframe(120, value=False)
+    timeline.tracks[2].add_keyframe(240, value=True)
+
+    # "angles" is a numpy array — Linear easing works element-wise.
+    timeline.tracks[3].add_keyframe(50, value=np.array([0.0, 0.0, 0.0]))
+    timeline.tracks[3].add_keyframe(150, value=np.array([45.0, 90.0, 180.0]))
+    timeline.tracks[3].add_keyframe(280, value=np.array([10.0, 20.0, 30.0]))
 
     info_label = QLabel("Move the playhead to see values")
     info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
     def _on_playhead(frame: int) -> None:
+        angles_str = "[" + ", ".join(f"{a:.1f}" for a in scene.angles) + "]"
         msg = (
             f"frame={frame:4d}  "
             f"x={scene.x:8.2f}  "
             f"y={scene.y:8.2f}  "
-            f"visible={scene.visible}"
+            f"visible={scene.visible!s:<5}  "
+            f"angles={angles_str}"
         )
         print(msg)
         info_label.setText(msg)
