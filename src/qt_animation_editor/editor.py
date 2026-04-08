@@ -79,15 +79,18 @@ _BUTTON_ICONS: dict[str, str] = {
     "play_once": "M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z",
     "loop":      "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v5z",
     "pingpong":  "M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z",
+    "plus":      "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z",
+    "minus":     "M19 13H5v-2h14v2z",
 }
 
 
 def _render_svg_icon(painter: QPainter, rect: QRect, icon_key: str, color: QColor) -> None:
     """Render a named SVG icon centred within *rect* using *color* as the fill.
 
+    The icon is always drawn as a square region centred inside *rect* so that
+    non-square buttons (e.g. the wide add-track row) don't stretch the shape.
     The icon path is looked up from ``_BUTTON_ICONS`` and rendered via
-    ``QSvgRenderer`` so that it always scales cleanly to the button size with
-    consistent centering regardless of the active font.
+    ``QSvgRenderer`` so that it scales cleanly at any button size.
     """
     path_d = _BUTTON_ICONS[icon_key]
     hex_color = color.name()
@@ -97,13 +100,13 @@ def _render_svg_icon(painter: QPainter, rect: QRect, icon_key: str, color: QColo
         f"</svg>"
     )
     renderer = QSvgRenderer(QByteArray(svg.encode()))
-    pad = max(4, min(rect.width(), rect.height()) // 6)
-    icon_rect = QRectF(
-        rect.x() + pad,
-        rect.y() + pad,
-        rect.width() - 2 * pad,
-        rect.height() - 2 * pad,
-    )
+    # Compute a square sub-rect centred in the button; padding scales with size.
+    side = min(rect.width(), rect.height())
+    pad = max(2, side // 6)
+    icon_side = side - 2 * pad
+    cx = rect.x() + rect.width() / 2
+    cy = rect.y() + rect.height() / 2
+    icon_rect = QRectF(cx - icon_side / 2, cy - icon_side / 2, icon_side, icon_side)
     renderer.render(painter, icon_rect)
 
 
@@ -387,10 +390,9 @@ class AnimationTimelineWidget(QWidget):
             painter.setBrush(self.remove_button_color)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRect(bx, by, btn_size, btn_size)
-            painter.setPen(Qt.GlobalColor.black)
-            lx = bx + (btn_size - metrics.horizontalAdvance("-")) // 2
-            ly = by + (btn_size + metrics.ascent() - metrics.descent()) // 2
-            painter.drawText(lx, ly, "-")
+            _render_svg_icon(
+                painter, QRect(bx, by, btn_size, btn_size), "minus", QColor(0, 0, 0)
+            )
 
     def _draw_add_button(self, painter: QPainter) -> None:
         """Draw the add-track (+) button below all track labels.
@@ -403,12 +405,10 @@ class AnimationTimelineWidget(QWidget):
         painter.setBrush(color)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRect(0, ay, self.left_margin, self.track_height)
-        cross_color = Qt.GlobalColor.black if can_add else QColor(100, 100, 100)
-        painter.setPen(cross_color)
-        cx = self.left_margin // 2
-        cy = ay + self.track_height // 2
-        painter.drawLine(cx - 8, cy, cx + 8, cy)
-        painter.drawLine(cx, cy - 8, cx, cy + 8)
+        icon_color = QColor(0, 0, 0) if can_add else QColor(100, 100, 100)
+        _render_svg_icon(
+            painter, QRect(0, ay, self.left_margin, self.track_height), "plus", icon_color
+        )
 
     def _draw_control_buttons(self, painter: QPainter) -> None:
         """Draw the home, play-mode, and play/pause buttons in the top-left corner."""
