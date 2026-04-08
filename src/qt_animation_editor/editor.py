@@ -1,6 +1,6 @@
 from qtpy.QtCore import QRectF, Qt
 from qtpy.QtGui import QColor, QFont, QKeyEvent, QPainter, QPen
-from qtpy.QtWidgets import QApplication, QScrollBar, QVBoxLayout, QWidget
+from qtpy.QtWidgets import QApplication, QMenu, QScrollBar, QVBoxLayout, QWidget
 
 _TRACK_COLORS = [
     QColor(255, 100, 100),
@@ -198,9 +198,17 @@ class AnimationTimelineWidget(QWidget):
                 str(frame),
             )
 
-        # tracks
+        # tracks (clipped so lines/keyframes never bleed into the label column)
+        painter.save()
+        painter.setClipRect(
+            self.left_margin,
+            self.top_margin,
+            self.width() - self.left_margin,
+            self.height() - self.top_margin,
+        )
         for i, track in enumerate(self.tracks):
             self.draw_track(painter, i, track)
+        painter.restore()
 
         # labels
         for i, track in enumerate(self.tracks):
@@ -227,26 +235,18 @@ class AnimationTimelineWidget(QWidget):
             painter.setPen(Qt.black)
             painter.drawText(bx + 4, by + 11, "-")
 
-        # add button
-        size = 18
-
-        y = (
-            self.top_margin
-            + len(self.tracks) * self.track_height
-            - self.scroll_y
-            + (self.track_height - size) // 2
-        )
-
-        x = 8
+        # add button — fills the full label-column width
+        ay = self.top_margin + len(self.tracks) * self.track_height - self.scroll_y
 
         painter.setBrush(self.add_button_color)
         painter.setPen(Qt.NoPen)
-        painter.drawRect(x, y, size, size)
+        painter.drawRect(0, ay, self.left_margin, self.track_height)
 
         painter.setPen(Qt.black)
-
-        painter.drawLine(x + 4, y + size // 2, x + size - 4, y + size // 2)
-        painter.drawLine(x + size // 2, y + 4, x + size // 2, y + size - 4)
+        cx = self.left_margin // 2
+        cy = ay + self.track_height // 2
+        painter.drawLine(cx - 8, cy, cx + 8, cy)
+        painter.drawLine(cx, cy - 8, cx, cy + 8)
 
         # playhead
         x = self.frame_to_x(self.current_frame)
@@ -306,6 +306,9 @@ class AnimationTimelineWidget(QWidget):
     # ------------------------------------------------
 
     def mousePressEvent(self, event):
+        if event.button() != Qt.LeftButton:
+            return
+
         playhead_x = self.frame_to_x(self.current_frame)
 
         if abs(event.x() - playhead_x) < 6:
@@ -325,12 +328,10 @@ class AnimationTimelineWidget(QWidget):
                 self.update()
                 return
 
-        # add button
+        # add button — full label-column width
         ay = self.top_margin + len(self.tracks) * self.track_height - self.scroll_y
-        add_btn_size = 18
-        add_btn_y = ay + (self.track_height - add_btn_size) // 2
 
-        if 8 <= x <= 8 + add_btn_size and add_btn_y <= y <= add_btn_y + add_btn_size:
+        if x < self.left_margin and ay <= y <= ay + self.track_height:
             self.add_track()
             return
 
@@ -342,8 +343,10 @@ class AnimationTimelineWidget(QWidget):
                     self.selected_keyframes.remove(clicked)
                 else:
                     self.selected_keyframes.append(clicked)
-
-            else:
+            elif clicked not in self.selected_keyframes:
+                # Replace selection only when clicking an unselected keyframe;
+                # clicking an already-selected keyframe preserves the multi-selection
+                # so the whole group can be dragged.
                 self.selected_keyframes = [clicked]
 
             self.selected_keyframe = clicked
@@ -353,7 +356,8 @@ class AnimationTimelineWidget(QWidget):
             return
 
         self.selected_keyframes.clear()
-        self.current_frame = max(0, self.x_to_frame(x))
+        if x >= self.left_margin:
+            self.current_frame = max(0, self.x_to_frame(x))
 
         self.update()
 
@@ -410,6 +414,57 @@ class AnimationTimelineWidget(QWidget):
 
     # ------------------------------------------------
 
+    def contextMenuEvent(self, event):
+        x = event.pos().x()
+        y = event.pos().y()
+
+        if x >= self.left_margin:
+            # Right-click on a keyframe → easing picker
+            kf = self.pos_to_keyframe(x, y)
+            if kf is None:
+                return
+
+            targets = self.selected_keyframes if kf in self.selected_keyframes else [kf]
+
+            menu = QMenu(self)
+            for easing in ["Linear", "Ease In", "Ease Out", "Ease In Out", "Constant"]:
+                action = menu.addAction(easing)
+                action.setCheckable(True)
+                action.setChecked(all(k.easing == easing for k in targets))
+
+                def _make_easing_setter(e, t):
+                    def _set(checked):
+                        for k in t:
+                            k.easing = e
+                        self.update()
+
+                    return _set
+
+                action.triggered.connect(_make_easing_setter(easing, list(targets)))
+            menu.exec(event.globalPos())
+        else:
+            # Right-click in the label area → track-option rename picker
+            track_index = self.y_to_track_index(y)
+            if not (0 <= track_index < len(self.tracks)):
+                return
+
+            track = self.tracks[track_index]
+            menu = QMenu(self)
+            for option in self.track_options:
+                action = menu.addAction(option)
+                action.setCheckable(True)
+                action.setChecked(track.name == option)
+
+                def _make_rename(t, n):
+                    def _rename(checked):
+                        t.name = n
+                        self.update()
+
+                    return _rename
+
+                action.triggered.connect(_make_rename(track, option))
+            menu.exec(event.globalPos())
+
     def pos_to_keyframe(self, x, y):
         track_index = self.y_to_track_index(y)
 
@@ -452,7 +507,7 @@ class AnimationTimelineWidget(QWidget):
             self.update()
             return
 
-        self.scroll_x += event.angleDelta().y()
+        self.scroll_x -= event.angleDelta().y()
 
         self.scroll_x = max(0, min(self.scroll_x, self.h_scroll.maximum()))
         self.h_scroll.setValue(self.scroll_x)
