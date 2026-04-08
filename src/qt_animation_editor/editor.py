@@ -2,6 +2,15 @@ from qtpy.QtCore import QRectF, Qt
 from qtpy.QtGui import QColor, QFont, QKeyEvent, QPainter, QPen
 from qtpy.QtWidgets import QApplication, QScrollBar, QVBoxLayout, QWidget
 
+_TRACK_COLORS = [
+    QColor(255, 100, 100),
+    QColor(100, 200, 100),
+    QColor(100, 150, 255),
+    QColor(255, 200, 80),
+    QColor(200, 100, 255),
+    QColor(80, 220, 200),
+]
+
 
 class Keyframe:
     def __init__(self, t, value=0, easing="Linear"):
@@ -11,9 +20,9 @@ class Keyframe:
 
 
 class Track:
-    def __init__(self, name, color):
+    def __init__(self, name, color=None):
         self.name = name
-        self.color = color
+        self.color = color or QColor(180, 180, 180)
         self.keyframes = []
 
     def add_keyframe(self, t, value=0, easing="Linear"):
@@ -73,6 +82,8 @@ class AnimationTimelineWidget(QWidget):
         self.v_scroll.valueChanged.connect(self.on_vscroll)
 
         self.label_font = QFont("Arial", 10)
+
+        self.setFocusPolicy(Qt.StrongFocus)
 
     # ------------------------------------------------
 
@@ -182,7 +193,7 @@ class AnimationTimelineWidget(QWidget):
 
             painter.setPen(self.time_label_color)
             painter.drawText(
-                int(x) - metrics.width(str(frame)) // 2,
+                int(x) - metrics.horizontalAdvance(str(frame)) // 2,
                 self.top_margin - 10,
                 str(frame),
             )
@@ -316,8 +327,10 @@ class AnimationTimelineWidget(QWidget):
 
         # add button
         ay = self.top_margin + len(self.tracks) * self.track_height - self.scroll_y
+        add_btn_size = 18
+        add_btn_y = ay + (self.track_height - add_btn_size) // 2
 
-        if 8 <= x <= 26 and ay <= y <= ay + 20:
+        if 8 <= x <= 8 + add_btn_size and add_btn_y <= y <= add_btn_y + add_btn_size:
             self.add_track()
             return
 
@@ -340,7 +353,7 @@ class AnimationTimelineWidget(QWidget):
             return
 
         self.selected_keyframes.clear()
-        self.current_frame = self.x_to_frame(x)
+        self.current_frame = max(0, self.x_to_frame(x))
 
         self.update()
 
@@ -361,12 +374,39 @@ class AnimationTimelineWidget(QWidget):
         for kf in self.selected_keyframes:
             kf.t = max(0, kf.t + delta)
 
+        for track in self.tracks:
+            track.keyframes.sort(key=lambda k: k.t)
+
         self.update_scrollbars()
         self.update()
 
     def mouseReleaseEvent(self, event):
         self.selected_keyframe = None
         self.scrubbing = False
+
+    def mouseDoubleClickEvent(self, event):
+        x = event.x()
+        y = event.y()
+
+        if x < self.left_margin:
+            return
+
+        track_index = self.y_to_track_index(y)
+
+        if not (0 <= track_index < len(self.tracks)):
+            return
+
+        frame = max(0, self.x_to_frame(x))
+        track = self.tracks[track_index]
+
+        try:
+            track.add_keyframe(frame)
+        except KeyError:
+            # A keyframe already exists at this frame; silently ignore the duplicate.
+            pass
+
+        self.update_scrollbars()
+        self.update()
 
     # ------------------------------------------------
 
@@ -412,7 +452,7 @@ class AnimationTimelineWidget(QWidget):
             self.update()
             return
 
-        self.scroll_x -= event.angleDelta().y()
+        self.scroll_x += event.angleDelta().y()
 
         self.scroll_x = max(0, min(self.scroll_x, self.h_scroll.maximum()))
         self.h_scroll.setValue(self.scroll_x)
@@ -436,7 +476,8 @@ class AnimationTimelineWidget(QWidget):
     # ------------------------------------------------
 
     def add_track(self, name=None):
-        self.tracks.append(Track(name or self.track_options[0]))
+        color = _TRACK_COLORS[len(self.tracks) % len(_TRACK_COLORS)]
+        self.tracks.append(Track(name or self.track_options[0], color))
         self.update_scrollbars()
         self.update()
 
@@ -450,9 +491,6 @@ if __name__ == "__main__":
 
     timeline.add_track("Location X")
     timeline.add_track("Rotation Z")
-
-    timeline.tracks[0].color = QColor(255, 100, 100)
-    timeline.tracks[1].color = QColor(100, 255, 100)
 
     for f in [50, 400, 900, 1500]:
         timeline.tracks[0].add_keyframe(f)
