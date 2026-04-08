@@ -9,8 +9,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import qt_animation_editor
 from qt_animation_editor.editor import (
-    EASING_OPTIONS,
     AnimationTimelineWidget,
+    EasingFunction,
     Keyframe,
     Track,
 )
@@ -25,19 +25,36 @@ def test_imports_with_version():
     assert isinstance(qt_animation_editor.__version__, str)
 
 
+class TestEasingFunction:
+    def test_linear_midpoint(self):
+        assert EasingFunction.Linear(0.5) == pytest.approx(0.5)
+
+    def test_linear_bounds(self):
+        assert EasingFunction.Linear(0.0) == pytest.approx(0.0)
+        assert EasingFunction.Linear(1.0) == pytest.approx(1.0)
+
+    def test_bool_before_end(self):
+        assert EasingFunction.Bool(0.0) == pytest.approx(0.0)
+        assert EasingFunction.Bool(0.999) == pytest.approx(0.0)
+
+    def test_bool_at_end(self):
+        assert EasingFunction.Bool(1.0) == pytest.approx(1.0)
+
+    def test_members_are_callable(self):
+        for ef in EasingFunction:
+            assert callable(ef)
+
+
 class TestKeyframe:
     def test_clamps_negative_t(self):
         assert Keyframe(-5).t == 0
 
     def test_default_easing(self):
-        kf = Keyframe(10)
-        assert kf.easing_in == "Linear"
-        assert kf.easing_out == "Linear"
+        assert Keyframe(10).easing is EasingFunction.Linear
 
     def test_custom_easing(self):
-        kf = Keyframe(5, easing_in="Ease In", easing_out="Ease Out")
-        assert kf.easing_in == "Ease In"
-        assert kf.easing_out == "Ease Out"
+        kf = Keyframe(5, easing=EasingFunction.Bool)
+        assert kf.easing is EasingFunction.Bool
 
 
 class TestTrack:
@@ -64,14 +81,6 @@ class TestTrack:
         assert Track("X").color.isValid()
 
 
-class TestEasingOptions:
-    def test_contains_linear(self):
-        assert "Linear" in EASING_OPTIONS
-
-    def test_non_empty(self):
-        assert len(EASING_OPTIONS) >= 3
-
-
 class TestAnimationTimelineWidget:
     def test_coordinate_roundtrip(self, qapp):
         w = AnimationTimelineWidget()
@@ -80,7 +89,6 @@ class TestAnimationTimelineWidget:
 
     def test_track_center_y(self, qapp):
         w = AnimationTimelineWidget()
-        # With no scrolling: centre of track 0 is top_margin + track_height/2.
         expected = w.top_margin + w.track_height / 2
         assert w.track_center_y(0) == expected
 
@@ -88,15 +96,36 @@ class TestAnimationTimelineWidget:
         w = AnimationTimelineWidget()
         received = []
         w.track_added.connect(received.append)
-        track = w.add_track("Rotation")
+        track = w.add_track("A")
         assert track in w.tracks
         assert received == [track]
 
     def test_add_track_returns_track(self, qapp):
         w = AnimationTimelineWidget()
-        track = w.add_track("Location X")
+        track = w.add_track("A")
         assert isinstance(track, Track)
-        assert track.name == "Location X"
+        assert track.name == "A"
+
+    def test_add_track_default_name_from_options(self, qapp):
+        """Without an explicit name, the first track_options key is used."""
+        w = AnimationTimelineWidget()
+        w.track_options = {"X": lambda v: None, "Y": lambda v: None}
+        track = w.add_track()
+        assert track.name == "X"
+
+    def test_track_colors_are_settable(self, qapp):
+        from qtpy.QtGui import QColor
+
+        w = AnimationTimelineWidget()
+        red = QColor(255, 0, 0)
+        w.track_colors = [red]
+        track = w.add_track("A")
+        assert track.color == red
+
+    def test_easing_options_are_settable(self, qapp):
+        w = AnimationTimelineWidget()
+        w.easing_options = [EasingFunction.Bool]
+        assert w.easing_options == [EasingFunction.Bool]
 
     def test_set_playhead_emits_signal(self, qapp):
         w = AnimationTimelineWidget()
@@ -118,7 +147,7 @@ class TestAnimationTimelineWidget:
     def test_pos_to_keyframe_hit(self, qapp):
         w = AnimationTimelineWidget()
         w.resize(800, 300)
-        w.add_track("X")
+        w.add_track("A")
         w.tracks[0].add_keyframe(10)
         x = w.frame_to_x(10)
         y = w.track_center_y(0)
@@ -127,15 +156,14 @@ class TestAnimationTimelineWidget:
     def test_pos_to_keyframe_miss(self, qapp):
         w = AnimationTimelineWidget()
         w.resize(800, 300)
-        w.add_track("X")
+        w.add_track("A")
         w.tracks[0].add_keyframe(10)
-        # Far away from the keyframe.
         assert w.pos_to_keyframe(0, 0) is None
 
     def test_keyframes_in_rect(self, qapp):
         w = AnimationTimelineWidget()
         w.resize(800, 300)
-        w.add_track("X")
+        w.add_track("A")
         w.tracks[0].add_keyframe(10)
         w.tracks[0].add_keyframe(100)
         # Build a rect that contains frame 10 but not frame 100.
@@ -149,7 +177,7 @@ class TestAnimationTimelineWidget:
     def test_delete_keyframes_emits_signal(self, qapp):
         w = AnimationTimelineWidget()
         w.resize(800, 300)
-        w.add_track("X")
+        w.add_track("A")
         kf = w.tracks[0].add_keyframe(10)
         w.selected_keyframes = [kf]
 
@@ -162,3 +190,72 @@ class TestAnimationTimelineWidget:
         w.keyPressEvent(press)
         assert len(w.tracks[0].keyframes) == 0
         assert removed == [[kf]]
+
+
+class TestInterpolation:
+    def _make_widget(self, qapp):
+        w = AnimationTimelineWidget()
+        w.add_track("A")
+        return w
+
+    def test_no_keyframes_returns_none(self, qapp):
+        w = self._make_widget(qapp)
+        assert w._interpolate_track(w.tracks[0], 50) is None
+
+    def test_single_keyframe_returns_its_value(self, qapp):
+        w = self._make_widget(qapp)
+        w.tracks[0].add_keyframe(10, value=7.0)
+        assert w._interpolate_track(w.tracks[0], 5) == pytest.approx(7.0)
+        assert w._interpolate_track(w.tracks[0], 10) == pytest.approx(7.0)
+        assert w._interpolate_track(w.tracks[0], 20) == pytest.approx(7.0)
+
+    def test_linear_interpolation_midpoint(self, qapp):
+        w = self._make_widget(qapp)
+        w.tracks[0].add_keyframe(0, value=0.0)
+        w.tracks[0].add_keyframe(100, value=10.0)
+        assert w._interpolate_track(w.tracks[0], 50) == pytest.approx(5.0)
+
+    def test_before_first_keyframe_clamps(self, qapp):
+        w = self._make_widget(qapp)
+        w.tracks[0].add_keyframe(50, value=3.0)
+        w.tracks[0].add_keyframe(100, value=6.0)
+        assert w._interpolate_track(w.tracks[0], 0) == pytest.approx(3.0)
+
+    def test_after_last_keyframe_clamps(self, qapp):
+        w = self._make_widget(qapp)
+        w.tracks[0].add_keyframe(0, value=0.0)
+        w.tracks[0].add_keyframe(100, value=5.0)
+        assert w._interpolate_track(w.tracks[0], 200) == pytest.approx(5.0)
+
+    def test_bool_easing_holds_then_jumps(self, qapp):
+        w = self._make_widget(qapp)
+        # Segment uses Bool easing: holds 0 until the very end of the interval.
+        w.tracks[0].add_keyframe(0, value=0.0, easing=EasingFunction.Bool)
+        w.tracks[0].add_keyframe(100, value=1.0)
+        assert w._interpolate_track(w.tracks[0], 50) == pytest.approx(0.0)
+        assert w._interpolate_track(w.tracks[0], 100) == pytest.approx(1.0)
+
+
+class TestTrackCallbackDispatch:
+    def test_callback_called_on_playhead_move(self, qapp):
+        w = AnimationTimelineWidget()
+        received = []
+        w.track_options = {"A": received.append}
+        w.add_track("A")
+        w.tracks[0].add_keyframe(0, value=0.0)
+        w.tracks[0].add_keyframe(100, value=10.0)
+
+        w._set_playhead(50)
+        assert len(received) == 1
+        assert received[0] == pytest.approx(5.0)
+
+    def test_no_callback_for_unregistered_track(self, qapp):
+        w = AnimationTimelineWidget()
+        received = []
+        w.track_options = {"A": received.append}
+        w.add_track("B")  # name not in track_options
+        w.tracks[0].add_keyframe(0, value=0.0)
+        w.tracks[0].add_keyframe(100, value=10.0)
+
+        w._set_playhead(50)
+        assert received == []

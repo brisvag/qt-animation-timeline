@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+import itertools
+from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 from qtpy.QtCore import QPoint, QRect, QRectF, Qt, Signal
 from qtpy.QtGui import (
     QColor,
@@ -15,9 +22,32 @@ from qtpy.QtGui import (
 )
 from qtpy.QtWidgets import QApplication, QMenu, QScrollBar, QVBoxLayout, QWidget
 
-EASING_OPTIONS: list[str] = ["Linear", "Ease In", "Ease Out", "Ease In Out", "Constant"]
 
-_TRACK_COLORS = [
+def _easing_linear(p: float) -> float:
+    return p
+
+
+def _easing_bool(p: float) -> float:
+    """Step function: holds the start value, then jumps to the end value at p=1."""
+    return float(p >= 1.0)
+
+
+class EasingFunction(Enum):
+    """Easing functions for keyframe segments.
+
+    Each member is callable as ``f(p) -> float`` where *p* ∈ [0, 1] is the
+    normalised progress within a segment.  The return value is the interpolation
+    factor applied to the value range ``(v_end - v_start)``.
+    """
+
+    Linear = _easing_linear
+    Bool = _easing_bool
+
+    def __call__(self, p: float) -> float:
+        return self.value(p)
+
+
+_DEFAULT_TRACK_COLORS = [
     QColor(255, 100, 100),
     QColor(100, 200, 100),
     QColor(100, 150, 255),
@@ -28,19 +58,18 @@ _TRACK_COLORS = [
 
 
 class Keyframe:
-    """A keyframe with a time position, value, and separate in/out easing curves."""
+    """A keyframe: time position, value, and easing for the segment after it."""
 
     def __init__(
         self,
         t: int,
         value: float = 0,
-        easing_in: str = "Linear",
-        easing_out: str = "Linear",
+        easing: EasingFunction = EasingFunction.Linear,
     ) -> None:
         self.t = max(0, int(t))
         self.value = value
-        self.easing_in = easing_in
-        self.easing_out = easing_out
+        # Controls the interpolation curve from this keyframe to the next one.
+        self.easing = easing
 
 
 class Track:
@@ -55,15 +84,14 @@ class Track:
         self,
         t: int,
         value: float = 0,
-        easing_in: str = "Linear",
-        easing_out: str = "Linear",
+        easing: EasingFunction = EasingFunction.Linear,
     ) -> Keyframe:
         """Add a keyframe at frame *t*, raising `KeyError` if one already exists."""
         t = max(0, int(t))
         for kf in self.keyframes:
             if kf.t == t:
                 raise KeyError(f"keyframe at frame {t} already exists")
-        kf = Keyframe(t, value, easing_in, easing_out)
+        kf = Keyframe(t, value, easing)
         self.keyframes.append(kf)
         self.keyframes.sort(key=lambda k: k.t)
         return kf
@@ -77,15 +105,15 @@ class AnimationTimelineWidget(QWidget):
     # Emitted when a track is added or removed.
     track_added = Signal(object)
     track_removed = Signal(object)
-    # Emitted when a track is renamed via the context menu.
-    track_renamed = Signal(object)
+    # Emitted when a track's option/name is changed via the context menu.
+    track_changed = Signal(object)
     # Emitted when a keyframe is created by the user.
     keyframe_added = Signal(object, object)
     # Emitted after one or more keyframes are deleted.
     keyframes_removed = Signal(list)
     # Emitted at the end of a keyframe drag operation.
     keyframes_moved = Signal(list)
-    # Emitted when easing is changed via the context menu.
+    # Emitted when the easing of one or more keyframes changes.
     easing_changed = Signal(list)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -110,13 +138,22 @@ class AnimationTimelineWidget(QWidget):
         self.min_frame_width: float = 2
         self.max_frame_width: float = 50
 
+        # Colours cycled through when adding new tracks.  Replace to customise.
+        self.track_colors: list[QColor] = list(_DEFAULT_TRACK_COLORS)
+
+        # Easing options shown in the right-click menu.  Replace to restrict choices.
+        self.easing_options: list[EasingFunction] = list(EasingFunction)
+
         self.tracks: list[Track] = []
-        self.track_options: list[str] = [
-            "Location X",
-            "Location Y",
-            "Rotation",
-            "Scale",
-        ]
+
+        # Maps track names to value-change callbacks called on every playhead move.
+        # The callback receives the interpolated float value at the current frame.
+        # Replace with application-specific setters, e.g. ``{"A": obj.set_x, …}``.
+        self.track_options: dict[str, Callable[[float], None]] = {
+            "A": lambda v: None,
+            "B": lambda v: None,
+            "C": lambda v: None,
+        }
 
         self.current_frame: int = 0
 
@@ -276,6 +313,7 @@ class AnimationTimelineWidget(QWidget):
             )
 
     def _draw_labels(self, painter: QPainter, metrics: QFontMetrics) -> None:
+        btn_size = 14
         for i, track in enumerate(self.tracks):
             y = self.top_margin + i * self.track_height - self.scroll_y
             if y < -self.track_height or y > self.height():
@@ -288,12 +326,16 @@ class AnimationTimelineWidget(QWidget):
                 track.name,
             )
 
-            bx, by = 8, y + (self.track_height - 14) // 2
+            bx = 8
+            by = y + (self.track_height - btn_size) // 2
             painter.setBrush(self.remove_button_color)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRect(bx, by, 14, 14)
+            painter.drawRect(bx, by, btn_size, btn_size)
             painter.setPen(Qt.GlobalColor.black)
-            painter.drawText(bx + 4, by + 11, "-")
+            # Centre the '-' glyph within the button rectangle.
+            lx = bx + (btn_size - metrics.horizontalAdvance("-")) // 2
+            ly = by + (btn_size + metrics.ascent() - metrics.descent()) // 2
+            painter.drawText(lx, ly, "-")
 
     def _draw_add_button(self, painter: QPainter) -> None:
         """Draw the add-track (+) button, which fills the full label column."""
@@ -508,10 +550,10 @@ class AnimationTimelineWidget(QWidget):
         if x >= self.left_margin:
             self._show_easing_menu(x, y, event.globalPos())
         else:
-            self._show_track_rename_menu(y, event.globalPos())
+            self._show_track_change_menu(y, event.globalPos())
 
     def _show_easing_menu(self, x: int, y: int, global_pos: object) -> None:
-        """Show a context menu with separate Easing In / Easing Out sub-menus."""
+        """Show easing options for the interval starting at the clicked keyframe."""
         kf = self.pos_to_keyframe(x, y)
         if kf is None:
             return
@@ -519,27 +561,23 @@ class AnimationTimelineWidget(QWidget):
         targets = self.selected_keyframes if kf in self.selected_keyframes else [kf]
         menu = QMenu(self)
 
-        def _add_submenu(title: str, attr: str) -> None:
-            submenu = menu.addMenu(title)
-            for easing in EASING_OPTIONS:
-                action = submenu.addAction(easing)
-                action.setCheckable(True)
-                action.setChecked(all(getattr(k, attr) == easing for k in targets))
+        for ef in self.easing_options:
+            action = menu.addAction(ef.name)
+            action.setCheckable(True)
+            action.setChecked(all(k.easing is ef for k in targets))
 
-                def _set(checked: bool, _e: str = easing, _a: str = attr) -> None:
-                    for k in targets:
-                        setattr(k, _a, _e)
-                    self.update()
-                    self.easing_changed.emit(list(targets))
+            def _set(checked: bool, _ef: EasingFunction = ef) -> None:
+                for k in targets:
+                    k.easing = _ef
+                self.update()
+                self.easing_changed.emit(list(targets))
 
-                action.triggered.connect(_set)
+            action.triggered.connect(_set)
 
-        _add_submenu("Easing In", "easing_in")
-        _add_submenu("Easing Out", "easing_out")
         menu.exec(global_pos)
 
-    def _show_track_rename_menu(self, y: int, global_pos: object) -> None:
-        """Show a context menu for renaming a track to one of the allowed options."""
+    def _show_track_change_menu(self, y: int, global_pos: object) -> None:
+        """Show a context menu for changing a track to one of the configured options."""
         track_index = self.y_to_track_index(y)
         if not (0 <= track_index < len(self.tracks)):
             return
@@ -551,12 +589,12 @@ class AnimationTimelineWidget(QWidget):
             action.setCheckable(True)
             action.setChecked(track.name == option)
 
-            def _rename(checked: bool, _t: Track = track, _n: str = option) -> None:
+            def _change(checked: bool, _t: Track = track, _n: str = option) -> None:
                 _t.name = _n
                 self.update()
-                self.track_renamed.emit(_t)
+                self.track_changed.emit(_t)
 
-            action.triggered.connect(_rename)
+            action.triggered.connect(_change)
         menu.exec(global_pos)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
@@ -589,16 +627,54 @@ class AnimationTimelineWidget(QWidget):
                 self.keyframes_removed.emit(removed)
 
     def _set_playhead(self, frame: int) -> None:
-        """Move the playhead to *frame* and emit ``playhead_moved`` if it changed."""
+        """Move the playhead to *frame*, dispatch callbacks, emit ``playhead_moved``."""
         if frame != self.current_frame:
             self.current_frame = frame
             self.playhead_moved.emit(frame)
+            self._dispatch_track_callbacks(frame)
         self.update()
+
+    def _dispatch_track_callbacks(self, frame: int) -> None:
+        """Call each track's callback with the interpolated value at *frame*."""
+        for track in self.tracks:
+            callback = self.track_options.get(track.name)
+            if callback is None:
+                continue
+            value = self._interpolate_track(track, frame)
+            if value is not None:
+                callback(value)
+
+    def _interpolate_track(self, track: Track, frame: int) -> float | None:
+        """Return the interpolated value of *track* at *frame*, or ``None`` if empty.
+
+        Easing is per-segment: the keyframe at the start of each interval controls
+        the interpolation curve for that interval.
+        """
+        kfs = track.keyframes
+        if not kfs:
+            return None
+        if len(kfs) == 1 or frame <= kfs[0].t:
+            return kfs[0].value
+        if frame >= kfs[-1].t:
+            return kfs[-1].value
+        for k1, k2 in itertools.pairwise(kfs):
+            if k1.t <= frame < k2.t:
+                span = k2.t - k1.t
+                # Guard against duplicate positions created by dragging.
+                if span == 0:
+                    return k2.value
+                p = (frame - k1.t) / span
+                return k1.value + (k2.value - k1.value) * k1.easing(p)
+        return kfs[-1].value  # unreachable, but keeps type-checker happy
 
     def add_track(self, name: str | None = None) -> Track:
         """Add a new track with an auto-assigned colour and return it."""
-        color = _TRACK_COLORS[len(self.tracks) % len(_TRACK_COLORS)]
-        track = Track(name or self.track_options[0], color)
+        if self.track_colors:
+            color = self.track_colors[len(self.tracks) % len(self.track_colors)]
+        else:
+            color = QColor(180, 180, 180)
+        default_name = next(iter(self.track_options), "Track")
+        track = Track(name or default_name, color)
         self.tracks.append(track)
         self.update_scrollbars()
         self.update()
@@ -612,21 +688,24 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     timeline = AnimationTimelineWidget()
+    timeline.track_options = {
+        "A": lambda v: print(f"A = {v:.3f}"),
+        "B": lambda v: print(f"B = {v:.3f}"),
+        "C": lambda v: print(f"C = {v:.3f}"),
+    }
 
-    timeline.add_track("Location X")
-    timeline.add_track("Rotation Z")
+    timeline.add_track("A")
+    timeline.add_track("B")
 
     for f in [50, 400, 900, 1500]:
-        timeline.tracks[0].add_keyframe(f)
+        timeline.tracks[0].add_keyframe(f, value=f * 0.1)
 
     for f in [100, 1200, 1700]:
-        timeline.tracks[1].add_keyframe(f)
+        timeline.tracks[1].add_keyframe(f, value=f * 0.5)
 
     main = QWidget()
-
     layout = QVBoxLayout(main)
     layout.addWidget(timeline)
-
     main.resize(1200, 400)
     main.show()
 
