@@ -111,7 +111,7 @@ class AnimationTimelineWidget(QWidget):
 
     Wraps an :class:`~qt_animation_timeline.models.Animation` and provides
     a Qt paint/event surface on top of it.  All animation state is accessible
-    and controllable programmatically through ``widget.state``.
+    and controllable programmatically through ``widget.animation``.
     """
 
     playhead_moved = Signal(int)
@@ -144,8 +144,6 @@ class AnimationTimelineWidget(QWidget):
         self.track_height: int = 28
         self._left_margin_min: int = 80
         self.left_margin: int = self._left_margin_min
-        # Extra pixel space to the left of frame 0 so the "0" label is never
-        # clipped by the label column when scrolled to the origin.
         self.left_timeline_pad: int = 20
         self.top_margin: int = 40
         self.min_frame_width: float = 0.05
@@ -154,9 +152,8 @@ class AnimationTimelineWidget(QWidget):
         self.track_color_cycle: list[QColor] = (
             list(track_color_cycle) if track_color_cycle is not None else list(_DEFAULT_TRACK_COLORS)
         )
-        self.easing_options: list[EasingFunction] = list(EasingFunction)
 
-        self.state = Animation(
+        self.animation = Animation(
             playback_speed=playback_speed,
             track_options=track_options if track_options is not None else {},
         )
@@ -185,35 +182,30 @@ class AnimationTimelineWidget(QWidget):
         self.font_size: int = font_size
         self.label_font = QFont("Arial", font_size)
 
-        # Connect Animation evented-model signals to widget updates.
-        # Scalar fields use .events.<name>; structural events use ClassVar signals.
-        self.state.events.current_frame.connect(self._on_state_frame_changed)
-        self.state.events.playing.connect(self._on_state_playing_changed)
-        self.state.track_added.connect(self._on_state_track_added)
-        self.state.track_removed.connect(self._on_state_track_removed)
-        self.state.track_changed.connect(self._on_state_track_changed)
-        self.state.keyframe_added.connect(self._on_state_keyframe_added)
-        self.state.keyframes_removed.connect(self._on_state_keyframes_removed)
-        self.state.keyframes_moved.connect(self._on_state_keyframes_moved)
-        self.state.easing_changed.connect(self._on_state_easing_changed)
+        self.animation.events.current_frame.connect(self._on_state_frame_changed)
+        self.animation.events.playing.connect(self._on_state_playing_changed)
+        self.animation.tracks.events.inserted.connect(self._on_track_added)
+        self.animation.tracks.events.removed.connect(self._on_track_removed)
+        self.animation.tracks.events.child_event.connect(self._on_track_child_event)
+        self.animation.keyframe_added.connect(self._on_state_keyframe_added)
+        self.animation.keyframes_removed.connect(self._on_state_keyframes_removed)
+        self.animation.keyframes_moved.connect(self._on_state_keyframes_moved)
+        self.animation.easing_changed.connect(self._on_state_easing_changed)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
-
-    # ------------------------------------------------------------------
-    # State signal handlers — keep widget and Qt signals in sync
 
     def _on_state_frame_changed(self, frame: int) -> None:
         self.update()
         self.playhead_moved.emit(frame)
 
-    def _on_state_track_added(self, track: Track) -> None:
+    def _on_track_added(self, index: int, track: Track) -> None:
         self.updateGeometry()
         self.update_scrollbars()
         self.update()
         self.track_added.emit(track)
 
-    def _on_state_track_removed(self, track: Track) -> None:
+    def _on_track_removed(self, index: int, track: Track) -> None:
         removed_kfs = set(track.keyframes)
         self.selected_keyframes = [kf for kf in self.selected_keyframes if kf not in removed_kfs]
         self.updateGeometry()
@@ -221,9 +213,14 @@ class AnimationTimelineWidget(QWidget):
         self.update()
         self.track_removed.emit(track)
 
-    def _on_state_track_changed(self, track: Track) -> None:
+    def _on_track_child_event(self, info: object) -> None:
         self.update()
-        self.track_changed.emit(track)
+        if getattr(info, "signal", None) is not None and info.signal.name == "name":  # type: ignore[union-attr]
+            path = getattr(info, "path", ())
+            if path:
+                idx = path[0][0]
+                if 0 <= idx < len(self.animation.tracks):
+                    self.track_changed.emit(self.animation.tracks[idx])
 
     def _on_state_keyframe_added(self, track: Track, kf: Keyframe) -> None:
         self.updateGeometry()
@@ -249,50 +246,20 @@ class AnimationTimelineWidget(QWidget):
 
     def _on_state_playing_changed(self, playing: bool) -> None:
         if playing:
-            interval = max(1, int(1000 / (self.state.play_fps * self.state.playback_speed)))
+            interval = max(1, int(1000 / (self.animation.play_fps * self.animation.playback_speed)))
             self._play_timer.start(interval)
         else:
             self._play_timer.stop()
         self.update()
 
     def _on_timer_tick(self) -> None:
-        self.state.advance_playhead()
-
-    # ------------------------------------------------------------------
-    # Forwarding properties for convenient access to state
-
-    @property
-    def tracks(self) -> list[Track]:
-        return self.state.tracks
-
-    @property
-    def current_frame(self) -> int:
-        return self.state.current_frame
-
-    @property
-    def track_options(self) -> dict[str, tuple[Any, str]]:
-        return self.state.track_options
-
-    @track_options.setter
-    def track_options(self, value: dict[str, tuple[Any, str]]) -> None:
-        self.state.track_options = value
-
-    @property
-    def playback_speed(self) -> float:
-        return self.state.playback_speed
-
-    @playback_speed.setter
-    def playback_speed(self, value: float) -> None:
-        self.state.playback_speed = value
-
-    # ------------------------------------------------------------------
-    # Size hints
+        self.animation.advance_playhead()
 
     def sizeHint(self) -> QSize:
         """Return a size fitting current tracks and visible keyframe range."""
-        n = max(4, len(self.state.tracks))
+        n = max(4, len(self.animation.tracks))
         max_frame = max(
-            (kf.t for t in self.state.tracks for kf in t.keyframes), default=50
+            (kf.t for t in self.animation.tracks for kf in t.keyframes), default=50
         )
         w = int(self._left_margin_min + self.left_timeline_pad + (max_frame + 20) * _DEFAULT_FRAME_WIDTH)
         h = self.top_margin + (n + 1) * self.track_height + 40
@@ -300,7 +267,7 @@ class AnimationTimelineWidget(QWidget):
 
     def minimumSizeHint(self) -> QSize:
         """Return the minimum useful size: 2 tracks high and 10 frames wide."""
-        n = max(2, len(self.state.tracks))
+        n = max(2, len(self.animation.tracks))
         w = int(self._left_margin_min + self.left_timeline_pad + 10 * _DEFAULT_FRAME_WIDTH)
         h = self.top_margin + (n + 1) * self.track_height + 40
         return QSize(w, h)
@@ -344,7 +311,7 @@ class AnimationTimelineWidget(QWidget):
     def update_scrollbars(self) -> None:
         """Recalculate scrollbar ranges based on content size."""
         self._update_left_margin()
-        max_frame = max((kf.t for t in self.state.tracks for kf in t.keyframes), default=0)
+        max_frame = max((kf.t for t in self.animation.tracks for kf in t.keyframes), default=0)
         content_width = self.left_timeline_pad + (max_frame + 20) * self.frame_width
         page_w = self.width() - self.left_margin
         need_hscroll = content_width > page_w
@@ -356,7 +323,7 @@ class AnimationTimelineWidget(QWidget):
             self.scroll_x = 0
             self.h_scroll.setMaximum(0)
 
-        total_tracks_height = len(self.state.tracks) * self.track_height
+        total_tracks_height = len(self.animation.tracks) * self.track_height
         page_h = self.height() - self.top_margin
         need_vscroll = total_tracks_height > page_h
         self.v_scroll.setVisible(need_vscroll)
@@ -376,11 +343,11 @@ class AnimationTimelineWidget(QWidget):
         self.update()
 
     def _update_left_margin(self) -> None:
-        if not self.state.tracks:
+        if not self.animation.tracks:
             self.left_margin = self._left_margin_min
             return
         metrics = QFontMetrics(self.label_font)
-        max_text_w = max(metrics.horizontalAdvance(t.name) for t in self.state.tracks)
+        max_text_w = max(metrics.horizontalAdvance(t.name) for t in self.animation.tracks)
         self.left_margin = max(self._left_margin_min, 40 + max_text_w + 10)
 
     def zoom_step(self) -> int:
@@ -423,7 +390,7 @@ class AnimationTimelineWidget(QWidget):
             self.width() - self.left_margin,
             self.height() - self.top_margin,
         )
-        for i, track in enumerate(self.state.tracks):
+        for i, track in enumerate(self.animation.tracks):
             self.draw_track(painter, i, track)
         if self._box_rect is not None:
             self._draw_rubber_band(painter)
@@ -433,7 +400,7 @@ class AnimationTimelineWidget(QWidget):
         self._draw_add_button(painter)
         self._draw_control_buttons(painter)
 
-        x = self.frame_to_x(self.state.current_frame)
+        x = self.frame_to_x(self.animation.current_frame)
         if x >= self.left_margin:
             xi = int(x)
             painter.setPen(QPen(self.current_frame_color, 2))
@@ -445,7 +412,7 @@ class AnimationTimelineWidget(QWidget):
             painter.drawPolygon(pts)
 
     def _draw_track_backgrounds(self, painter: QPainter) -> None:
-        for i in range(len(self.state.tracks)):
+        for i in range(len(self.animation.tracks)):
             y = self.top_margin + i * self.track_height - self.scroll_y
             painter.fillRect(
                 self.left_margin, y,
@@ -483,7 +450,7 @@ class AnimationTimelineWidget(QWidget):
 
     def _draw_labels(self, painter: QPainter, metrics: QFontMetrics) -> None:
         btn_size = 14
-        for i, track in enumerate(self.state.tracks):
+        for i, track in enumerate(self.animation.tracks):
             y = self.top_margin + i * self.track_height - self.scroll_y
             if y < -self.track_height or y > self.height():
                 continue
@@ -504,8 +471,8 @@ class AnimationTimelineWidget(QWidget):
 
     def _draw_add_button(self, painter: QPainter) -> None:
         """Draw the add-track (+) button below all track labels."""
-        ay = self.top_margin + len(self.state.tracks) * self.track_height - self.scroll_y
-        can_add = self.state._can_add_track()
+        ay = self.top_margin + len(self.animation.tracks) * self.track_height - self.scroll_y
+        can_add = self.animation._can_add_track()
         color = self.add_button_color if can_add else QColor(60, 60, 60)
         painter.setBrush(color)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -524,9 +491,9 @@ class AnimationTimelineWidget(QWidget):
         _render_svg_icon(painter, QRect(0, 0, btn_w, h), "home", self.control_btn_text_color)
 
         painter.fillRect(QRect(btn_w, 0, btn_w, h), self.loop_btn_color)
-        _render_svg_icon(painter, QRect(btn_w, 0, btn_w, h), _PLAY_MODE_ICONS[self.state.play_mode], self.loop_btn_text_color)
+        _render_svg_icon(painter, QRect(btn_w, 0, btn_w, h), _PLAY_MODE_ICONS[self.animation.play_mode], self.loop_btn_text_color)
 
-        play_icon = "pause" if self.state.playing else "play"
+        play_icon = "pause" if self.animation.playing else "play"
         painter.fillRect(QRect(2 * btn_w, 0, btn_w3, h), self.play_btn_color)
         _render_svg_icon(painter, QRect(2 * btn_w, 0, btn_w3, h), play_icon, self.play_btn_text_color)
 
@@ -608,8 +575,8 @@ class AnimationTimelineWidget(QWidget):
 
         if self._is_on_track_line(x, y):
             track_index = self.y_to_track_index(y)
-            if 0 <= track_index < len(self.state.tracks):
-                self._dragging_track = self.state.tracks[track_index]
+            if 0 <= track_index < len(self.animation.tracks):
+                self._dragging_track = self.animation.tracks[track_index]
                 self._track_drag_x = x
                 return
 
@@ -621,23 +588,23 @@ class AnimationTimelineWidget(QWidget):
         if x < btn_w:
             self._reset_view()
         elif x < 2 * btn_w:
-            self.state.cycle_play_mode()
+            self.animation.cycle_play_mode()
         else:
             self._toggle_playback()
 
     def _handle_label_click(self, x: int, y: int, global_pos: object) -> None:
         """Handle a left-click inside the label column (remove / add buttons)."""
-        for i in range(len(self.state.tracks)):
+        for i in range(len(self.animation.tracks)):
             ty = self.top_margin + i * self.track_height - self.scroll_y
             btn_size = 14
             by = ty + (self.track_height - btn_size) // 2
             if 8 <= x <= 8 + btn_size and by <= y <= by + btn_size:
-                track = self.state.tracks[i]
-                self.state.remove_track(track)
+                track = self.animation.tracks[i]
+                self.animation.remove_track(track)
                 return
 
-        ay = self.top_margin + len(self.state.tracks) * self.track_height - self.scroll_y
-        if ay <= y <= ay + self.track_height and self.state._can_add_track():
+        ay = self.top_margin + len(self.animation.tracks) * self.track_height - self.scroll_y
+        if ay <= y <= ay + self.track_height and self.animation._can_add_track():
             self._show_add_track_popup(global_pos)
 
     def _start_keyframe_drag(self, event: QMouseEvent, kf: Keyframe, x: int) -> None:
@@ -708,7 +675,7 @@ class AnimationTimelineWidget(QWidget):
             return
         for kf in self.selected_keyframes:
             kf.t = max(0, kf.t + delta)
-        for track in self.state.tracks:
+        for track in self.animation.tracks:
             track.keyframes.sort(key=lambda k: k.t)
         self.update_scrollbars()
         self.update()
@@ -722,7 +689,7 @@ class AnimationTimelineWidget(QWidget):
     def _keyframes_in_rect(self, rect: QRect) -> list[Keyframe]:
         """Return all keyframes whose centre point lies within *rect*."""
         result = []
-        for i, track in enumerate(self.state.tracks):
+        for i, track in enumerate(self.animation.tracks):
             cy = int(self.track_center_y(i))
             for kf in track.keyframes:
                 cx = int(self.frame_to_x(kf.t))
@@ -732,11 +699,11 @@ class AnimationTimelineWidget(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if self._dragging_track is not None:
-            self.state.notify_keyframes_moved(list(self._dragging_track.keyframes))
+            self.animation.notify_keyframes_moved(list(self._dragging_track.keyframes))
             self._dragging_track = None
 
         if self._dragging_keyframes and self.selected_keyframes:
-            self.state.notify_keyframes_moved(list(self.selected_keyframes))
+            self.animation.notify_keyframes_moved(list(self.selected_keyframes))
 
         self._scrubbing = False
         self._drag_pivot = None
@@ -760,26 +727,26 @@ class AnimationTimelineWidget(QWidget):
             return
 
         track_index = self.y_to_track_index(y)
-        if not (0 <= track_index < len(self.state.tracks)):
+        if not (0 <= track_index < len(self.animation.tracks)):
             return
 
         frame = max(0, self.x_to_frame(x))
-        track = self.state.tracks[track_index]
+        track = self.animation.tracks[track_index]
 
-        binding = self.state.track_options.get(track.name)
+        binding = self.animation.track_options.get(track.name)
         initial_value = getattr(binding[0], binding[1]) if binding is not None else 0
 
         try:
-            self.state.add_keyframe(track, frame, value=initial_value)
+            self.animation.add_keyframe(track, frame, value=initial_value)
         except KeyError:
             return
 
     def pos_to_keyframe(self, x: float, y: float) -> Keyframe | None:
         """Return the keyframe at screen position *(x, y)*, or ``None``."""
         track_index = self.y_to_track_index(y)
-        if not (0 <= track_index < len(self.state.tracks)):
+        if not (0 <= track_index < len(self.animation.tracks)):
             return None
-        track = self.state.tracks[track_index]
+        track = self.animation.tracks[track_index]
         cy = self.track_center_y(track_index)
         for kf in track.keyframes:
             kx = self.frame_to_x(kf.t)
@@ -803,9 +770,9 @@ class AnimationTimelineWidget(QWidget):
         clicking past all keyframes.  Returns ``None`` when the track is empty.
         """
         track_index = self.y_to_track_index(y)
-        if not (0 <= track_index < len(self.state.tracks)):
+        if not (0 <= track_index < len(self.animation.tracks)):
             return None
-        track = self.state.tracks[track_index]
+        track = self.animation.tracks[track_index]
         kfs = track.keyframes
         if not kfs:
             return None
@@ -823,23 +790,23 @@ class AnimationTimelineWidget(QWidget):
         For ``bool`` fields only ``Step`` is offered since linear interpolation
         of 0/1 produces non-boolean intermediates.
         """
-        binding = self.state.track_options.get(track.name)
+        binding = self.animation.track_options.get(track.name)
         if binding is None:
-            return self.easing_options
+            return self.animation.easing_options
         model, field = binding
         try:
             value = getattr(model, field)
         except AttributeError:
-            return self.easing_options
+            return self.animation.easing_options
         if isinstance(value, bool):
-            return [ef for ef in self.easing_options if ef is EasingFunction.Step]
-        return self.easing_options
+            return [ef for ef in self.animation.easing_options if ef is EasingFunction.Step]
+        return self.animation.easing_options
 
     def _is_on_track_line(self, x: int, y: int) -> bool:
         """Return ``True`` if *(x, y)* is within ``line_thickness + 4`` pixels
         of a track's horizontal centre line."""
         track_index = self.y_to_track_index(y)
-        if not (0 <= track_index < len(self.state.tracks)):
+        if not (0 <= track_index < len(self.animation.tracks)):
             return False
         cy = self.track_center_y(track_index)
         return abs(y - cy) <= self.line_thickness + 4
@@ -860,12 +827,12 @@ class AnimationTimelineWidget(QWidget):
 
         track_index = self.y_to_track_index(y)
         track = (
-            self.state.tracks[track_index] if 0 <= track_index < len(self.state.tracks) else None
+            self.animation.tracks[track_index] if 0 <= track_index < len(self.animation.tracks) else None
         )
         allowed = (
             self._get_allowed_easings_for_track(track)
             if track is not None
-            else self.easing_options
+            else self.animation.easing_options
         )
 
         targets = self.selected_keyframes if kf in self.selected_keyframes else [kf]
@@ -879,7 +846,7 @@ class AnimationTimelineWidget(QWidget):
             def _set(checked: bool, _ef: EasingFunction = ef) -> None:
                 for k in targets:
                     k.easing = _ef
-                self.state.notify_easing_changed(list(targets))
+                self.animation.notify_easing_changed(list(targets))
 
             action.triggered.connect(_set)
 
@@ -891,11 +858,11 @@ class AnimationTimelineWidget(QWidget):
         Options already used by *other* tracks are disabled to enforce uniqueness.
         """
         used_by_others = {
-            t.name for t in self.state.tracks if t is not track
+            t.name for t in self.animation.tracks if t is not track
         }
         return [
             (opt, opt not in used_by_others)
-            for opt in self.state.track_options
+            for opt in self.animation.track_options
         ]
 
     def _show_track_change_menu(self, y: int, global_pos: object) -> None:
@@ -904,10 +871,10 @@ class AnimationTimelineWidget(QWidget):
         Options already used by other tracks are disabled to enforce uniqueness.
         """
         track_index = self.y_to_track_index(y)
-        if not (0 <= track_index < len(self.state.tracks)):
+        if not (0 <= track_index < len(self.animation.tracks)):
             return
 
-        track = self.state.tracks[track_index]
+        track = self.animation.tracks[track_index]
         options = self._get_track_change_options(track)
 
         container = QWidget(self, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
@@ -940,7 +907,10 @@ class AnimationTimelineWidget(QWidget):
             model_item = combo.model().item(idx)
             if model_item is not None and not model_item.isEnabled():
                 return
-            self.state.rename_track(track, combo.itemText(idx))
+            new_name = combo.itemText(idx)
+            if new_name != track.name:
+                self.animation.remove_track(track)
+                self.add_track(new_name)
             container.close()
 
         combo.activated.connect(_apply)
@@ -952,7 +922,7 @@ class AnimationTimelineWidget(QWidget):
         click an item or type a search term and press Enter to add the first
         matching (highlighted) item.
         """
-        available = self.state.available_track_options()
+        available = self.animation.available_track_options()
         if not available:
             return
 
@@ -1029,26 +999,20 @@ class AnimationTimelineWidget(QWidget):
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Delete:
             removed = list(self.selected_keyframes)
-            self.state.remove_keyframes(removed)
+            self.animation.remove_keyframes(removed)
             self.selected_keyframes.clear()
         elif event.key() == Qt.Key.Key_Space:
             self._toggle_playback()
         elif event.key() == Qt.Key.Key_Left:
-            self._set_playhead(max(0, self.state.current_frame - 1))
+            self._set_playhead(max(0, self.animation.current_frame - 1))
         elif event.key() == Qt.Key.Key_Right:
-            self._set_playhead(self.state.current_frame + 1)
+            self._set_playhead(self.animation.current_frame + 1)
 
     # ------------------------------------------------------------------
     # Playback
 
     def _toggle_playback(self) -> None:
-        self.state.playing = not self.state.playing
-
-    def _start_playback(self) -> None:
-        self.state.playing = True
-
-    def _stop_playback(self) -> None:
-        self.state.playing = False
+        self.animation.playing = not self.animation.playing
 
     def _reset_view(self) -> None:
         """Fit the entire keyframe range in the viewport and scroll to the origin.
@@ -1058,7 +1022,7 @@ class AnimationTimelineWidget(QWidget):
         timeline width.
         """
         max_frame = max(
-            (kf.t for t in self.state.tracks for kf in t.keyframes), default=0
+            (kf.t for t in self.animation.tracks for kf in t.keyframes), default=0
         )
         buffer = max(10, max_frame // 10)
         total_frames = max_frame + buffer
@@ -1080,25 +1044,25 @@ class AnimationTimelineWidget(QWidget):
 
     def _set_playhead(self, frame: int) -> None:
         """Move the playhead to *frame*."""
-        self.state.current_frame = frame
+        self.animation.current_frame = frame
 
     # ------------------------------------------------------------------
     # Track management helpers
 
     def _can_add_track(self) -> bool:
-        return self.state._can_add_track()
+        return self.animation._can_add_track()
 
     def add_track(self, name: str, color: tuple[int, int, int] | None = None) -> Track:
         """Add a new track with an auto-assigned colour and return it."""
         if color is None:
             qcolor = self.track_color_cycle[
-                len(self.state.tracks) % len(self.track_color_cycle)
+                len(self.animation.tracks) % len(self.track_color_cycle)
             ] if self.track_color_cycle else None
             color = (qcolor.red(), qcolor.green(), qcolor.blue()) if qcolor else (180, 180, 180)
-        return self.state.add_track(name, color)
+        return self.animation.add_track(name, color)
 
     def _interpolate_track(self, track: Track, frame: int) -> Any:
-        return self.state.interpolate_track(track, frame)
+        return self.animation.interpolate_track(track, frame)
 
     def _dispatch_track_callbacks(self, frame: int) -> None:
-        self.state._dispatch_track_callbacks(frame)
+        self.animation._dispatch_track_callbacks(frame)
