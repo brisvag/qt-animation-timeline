@@ -833,6 +833,8 @@ class AnimationTimelineWidget(QWidget):
             return self.easing_options
         if isinstance(value, bool):
             return [ef for ef in self.easing_options if ef is EasingFunction.Step]
+        if isinstance(value, str):
+            return [ef for ef in self.easing_options if ef is EasingFunction.Step]
         return self.easing_options
 
     def _is_on_track_line(self, x: int, y: int) -> bool:

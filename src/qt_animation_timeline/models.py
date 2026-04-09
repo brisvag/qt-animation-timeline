@@ -60,6 +60,9 @@ def _interpolate_field(easing: EasingFunction, p: float, v1: Any, v2: Any) -> An
     """Interpolate between *v1* and *v2* using *easing*, falling back to Step."""
     if easing is not EasingFunction.Linear:
         return easing(p, v1, v2)
+    # str values must never be cast to numbers; always use Step regardless of easing.
+    if isinstance(v1, str) or isinstance(v2, str):
+        return EasingFunction.Step(p, v1, v2)
     try:
         v1n = np.asarray(v1, dtype=float) if isinstance(v1, (list, tuple)) else v1
         v2n = np.asarray(v2, dtype=float) if isinstance(v2, (list, tuple)) else v2
