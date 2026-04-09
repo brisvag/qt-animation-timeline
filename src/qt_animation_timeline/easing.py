@@ -240,9 +240,12 @@ def _coerce_value(reference: Any, interpolated: Any) -> Any:
     types are also returned unchanged — they arise only from the ``Step``
     easing which returns the original value directly.
     """
-    # interpolation is all or nothing for str and bool, no need to cast
-    if isinstance(reference, str | bool):
+    # str values come only from Step easing which returns the original; pass through unchanged.
+    if isinstance(reference, str):
         return interpolated
+    # bool must be cast back; linear interpolation produces floats.
+    if isinstance(reference, bool):
+        return bool(round(interpolated))
     if isinstance(reference, int):
         return round(interpolated)
     # list / tuple (including nested): cast each element back recursively.
