@@ -22,12 +22,13 @@ from qtpy.QtWidgets import QMenu, QScrollBar, QToolTip, QVBoxLayout, QWidget
 from superqt import QSearchableComboBox
 
 from qt_animation_timeline.easing import EasingFunction
-from qt_animation_timeline.models import Keyframe, Track
-from qt_animation_timeline.state import (
+from qt_animation_timeline.models import (
     PLAY_LOOP,
     PLAY_NORMAL,
     PLAY_PINGPONG,
-    AnimationState,
+    Animation,
+    Keyframe,
+    Track,
 )
 
 # Aliases kept for any code that imports these names from this module.
@@ -113,7 +114,7 @@ def _render_svg_icon(painter: QPainter, rect: QRect, icon_key: str, color: QColo
 class AnimationTimelineWidget(QWidget):
     """Interactive animation timeline widget.
 
-    Wraps an :class:`~qt_animation_timeline.state.AnimationState` and provides
+    Wraps an :class:`~qt_animation_timeline.models.Animation` and provides
     a Qt paint/event surface on top of it.  All animation state is accessible
     and controllable programmatically through ``widget.state``.
     """
@@ -160,7 +161,7 @@ class AnimationTimelineWidget(QWidget):
         )
         self.easing_options: list[EasingFunction] = list(EasingFunction)
 
-        self.state = AnimationState(
+        self.state = Animation(
             playback_speed=playback_speed,
             track_options=track_options if track_options is not None else {},
         )
@@ -187,8 +188,10 @@ class AnimationTimelineWidget(QWidget):
         self.font_size: int = font_size
         self.label_font = QFont("Arial", font_size)
 
-        # Connect state signals to widget updates and Qt signal forwarding.
-        self.state.frame_changed.connect(self._on_state_frame_changed)
+        # Connect Animation evented-model signals to widget updates.
+        # Scalar fields use .events.<name>; structural events use ClassVar signals.
+        self.state.events.current_frame.connect(self._on_state_frame_changed)
+        self.state.events.playing.connect(self._on_state_playing_changed)
         self.state.track_added.connect(self._on_state_track_added)
         self.state.track_removed.connect(self._on_state_track_removed)
         self.state.track_changed.connect(self._on_state_track_changed)
@@ -196,7 +199,6 @@ class AnimationTimelineWidget(QWidget):
         self.state.keyframes_removed.connect(self._on_state_keyframes_removed)
         self.state.keyframes_moved.connect(self._on_state_keyframes_moved)
         self.state.easing_changed.connect(self._on_state_easing_changed)
-        self.state.playing_changed.connect(self._on_state_playing_changed)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
@@ -209,6 +211,7 @@ class AnimationTimelineWidget(QWidget):
         self.playhead_moved.emit(frame)
 
     def _on_state_track_added(self, track: Track) -> None:
+        self.updateGeometry()
         self.update_scrollbars()
         self.update()
         self.track_added.emit(track)
@@ -216,6 +219,7 @@ class AnimationTimelineWidget(QWidget):
     def _on_state_track_removed(self, track: Track) -> None:
         removed_kfs = set(track.keyframes)
         self.selected_keyframes = [kf for kf in self.selected_keyframes if kf not in removed_kfs]
+        self.updateGeometry()
         self.update_scrollbars()
         self.update()
         self.track_removed.emit(track)
@@ -225,16 +229,19 @@ class AnimationTimelineWidget(QWidget):
         self.track_changed.emit(track)
 
     def _on_state_keyframe_added(self, track: Track, kf: Keyframe) -> None:
+        self.updateGeometry()
         self.update_scrollbars()
         self.update()
         self.keyframe_added.emit(track, kf)
 
     def _on_state_keyframes_removed(self, keyframes: list[Keyframe]) -> None:
+        self.updateGeometry()
         self.update_scrollbars()
         self.update()
         self.keyframes_removed.emit(keyframes)
 
     def _on_state_keyframes_moved(self, keyframes: list[Keyframe]) -> None:
+        self.updateGeometry()
         self.update_scrollbars()
         self.update()
         self.keyframes_moved.emit(keyframes)
@@ -285,15 +292,20 @@ class AnimationTimelineWidget(QWidget):
     # Size hints
 
     def sizeHint(self) -> QSize:
-        """Return a default size fitting ≥ 4 tracks and ≥ 50 visible frames."""
-        w = int(self._left_margin_min + self.left_timeline_pad + 50 * _DEFAULT_FRAME_WIDTH)
-        h = self.top_margin + 4 * self.track_height + 20
+        """Return a size fitting current tracks and visible keyframe range."""
+        n = max(4, len(self.state.tracks))
+        max_frame = max(
+            (kf.t for t in self.state.tracks for kf in t.keyframes), default=50
+        )
+        w = int(self._left_margin_min + self.left_timeline_pad + (max_frame + 20) * _DEFAULT_FRAME_WIDTH)
+        h = self.top_margin + n * self.track_height + 20
         return QSize(w, h)
 
     def minimumSizeHint(self) -> QSize:
         """Return the minimum useful size: 2 tracks high and 10 frames wide."""
+        n = max(2, len(self.state.tracks))
         w = int(self._left_margin_min + self.left_timeline_pad + 10 * _DEFAULT_FRAME_WIDTH)
-        h = self.top_margin + 2 * self.track_height + 20
+        h = self.top_margin + n * self.track_height + 20
         return QSize(w, h)
 
     def frame_to_x(self, frame: int | float) -> float:
@@ -326,9 +338,11 @@ class AnimationTimelineWidget(QWidget):
 
     def resizeEvent(self, event) -> None:
         vsw = 20 if self.v_scroll.isVisible() else 0
+        hsw = 20 if self.h_scroll.isVisible() else 0
         self.h_scroll.setGeometry(0, self.height() - 20, self.width() - vsw, 20)
-        self.v_scroll.setGeometry(self.width() - 20, 0, 20, self.height() - 20)
+        self.v_scroll.setGeometry(self.width() - 20, 0, 20, self.height() - hsw)
         self.update_scrollbars()
+
 
     def update_scrollbars(self) -> None:
         """Recalculate scrollbar ranges based on content size."""
@@ -336,8 +350,14 @@ class AnimationTimelineWidget(QWidget):
         max_frame = max((kf.t for t in self.state.tracks for kf in t.keyframes), default=0)
         content_width = self.left_timeline_pad + (max_frame + 20) * self.frame_width
         page_w = self.width() - self.left_margin
-        self.h_scroll.setMaximum(max(0, int(content_width - page_w)))
-        self.h_scroll.setPageStep(int(page_w))
+        need_hscroll = content_width > page_w
+        self.h_scroll.setVisible(need_hscroll)
+        if need_hscroll:
+            self.h_scroll.setMaximum(int(content_width - page_w))
+            self.h_scroll.setPageStep(int(page_w))
+        else:
+            self.scroll_x = 0
+            self.h_scroll.setMaximum(0)
 
         total_tracks_height = len(self.state.tracks) * self.track_height
         page_h = self.height() - self.top_margin
@@ -489,34 +509,37 @@ class AnimationTimelineWidget(QWidget):
         """Draw the add-track (+) button below all track labels.
 
         Greyed out when no further track options are available.
+        The button is drawn in the same width and column layout as the
+        control buttons above so the edges line up exactly.
         """
+        btn_w = self.left_margin // 3
         ay = self.top_margin + len(self.state.tracks) * self.track_height - self.scroll_y
         can_add = self.state._can_add_track()
         color = self.add_button_color if can_add else QColor(60, 60, 60)
         painter.setBrush(color)
         painter.setPen(Qt.PenStyle.NoPen)
+        # Fill the full label column so the background matches the control buttons.
         painter.drawRect(0, ay, self.left_margin, self.track_height)
+        # Draw the + icon in the same slot as the play button (rightmost third).
         icon_color = QColor(0, 0, 0) if can_add else QColor(100, 100, 100)
-        _render_svg_icon(
-            painter, QRect(0, ay, self.left_margin, self.track_height), "plus", icon_color
-        )
+        icon_rect = QRect(2 * btn_w, ay, self.left_margin - 2 * btn_w, self.track_height)
+        _render_svg_icon(painter, icon_rect, "plus", icon_color)
 
     def _draw_control_buttons(self, painter: QPainter) -> None:
         btn_w = self.left_margin // 3
+        # Last button extends to left_margin exactly to avoid a rounding gap.
+        btn_w3 = self.left_margin - 2 * btn_w
         h = self.top_margin
-        btn_rect = QRect(0, 0, btn_w, h)
 
-        painter.fillRect(btn_rect, self.control_btn_color)
-        _render_svg_icon(painter, btn_rect, "home", self.control_btn_text_color)
+        painter.fillRect(QRect(0, 0, btn_w, h), self.control_btn_color)
+        _render_svg_icon(painter, QRect(0, 0, btn_w, h), "home", self.control_btn_text_color)
 
-        btn_rect.moveLeft(btn_w)
-        painter.fillRect(btn_rect, self.loop_btn_color)
-        _render_svg_icon(painter, btn_rect, _PLAY_MODE_ICONS[self.state.play_mode], self.loop_btn_text_color)
+        painter.fillRect(QRect(btn_w, 0, btn_w, h), self.loop_btn_color)
+        _render_svg_icon(painter, QRect(btn_w, 0, btn_w, h), _PLAY_MODE_ICONS[self.state.play_mode], self.loop_btn_text_color)
 
-        btn_rect.moveLeft(2 * btn_w)
-        painter.fillRect(btn_rect, self.play_btn_color)
         play_icon = "pause" if self.state.playing else "play"
-        _render_svg_icon(painter, btn_rect, play_icon, self.play_btn_text_color)
+        painter.fillRect(QRect(2 * btn_w, 0, btn_w3, h), self.play_btn_color)
+        _render_svg_icon(painter, QRect(2 * btn_w, 0, btn_w3, h), play_icon, self.play_btn_text_color)
 
     def _draw_rubber_band(self, painter: QPainter) -> None:
         assert self._box_rect is not None
@@ -902,7 +925,9 @@ class AnimationTimelineWidget(QWidget):
     def _show_add_track_popup(self, global_pos: object) -> None:
         """Show a searchable combo-box to pick which track to add.
 
-        Only available (unused) track options are shown and enabled.
+        Only available (unused) track options are shown.  The user can either
+        click an item or type a search term and press Enter to add the first
+        matching (highlighted) item.
         """
         available = self.state.available_track_options()
         if not available:
@@ -930,7 +955,12 @@ class AnimationTimelineWidget(QWidget):
                 self.add_track(name)
             container.close()
 
+        def _add_from_enter() -> None:
+            _add(combo.currentIndex())
+
         combo.activated.connect(_add)
+        if combo.lineEdit() is not None:
+            combo.lineEdit().returnPressed.connect(_add_from_enter)
 
     # ------------------------------------------------------------------
     # Zoom / scroll

@@ -1,4 +1,5 @@
 import os
+import dataclasses
 
 import numpy as np
 import pytest
@@ -19,7 +20,7 @@ from qt_animation_timeline.editor import (
     _PLAY_PINGPONG,
     AnimationTimelineWidget,
 )
-from qt_animation_timeline.models import Keyframe, Track
+from qt_animation_timeline.models import Animation, Keyframe, Track
 from qt_animation_timeline.state import AnimationState, PLAY_LOOP, PLAY_NORMAL, PLAY_PINGPONG
 
 
@@ -30,7 +31,9 @@ def qapp():
 
 def test_imports_with_version():
     assert isinstance(qt_animation_timeline.__version__, str)
-    assert hasattr(qt_animation_timeline, "AnimationState")
+    assert hasattr(qt_animation_timeline, "Animation")
+    assert hasattr(qt_animation_timeline, "AnimationState")  # backward-compat alias
+    assert qt_animation_timeline.AnimationState is qt_animation_timeline.Animation
 
 
 def test_easing_linear(qapp):
@@ -839,12 +842,54 @@ def test_size_hint(qapp):
     assert isinstance(sh, QSize) and isinstance(msh, QSize)
 
 
-def test_animation_state_signals(qapp):
-    """AnimationState emits psygnal signals with no Qt dependency in signal logic."""
+def test_model_field_interpolation(qapp):
+    """Keyframe values that are dataclass instances are interpolated field-by-field."""
+    @dataclasses.dataclass
+    class Pose:
+        x: float = 0.0
+        y: float = 0.0
+        label: str = "start"
+
+    class Obj:
+        def __init__(self):
+            self.pos = Pose(0.0, 0.0, "start")
+
+    obj = Obj()
+    state = Animation(track_options={"pos": (obj, "pos")})
+    track = state.add_track("pos")
+    track.add_keyframe(0, Pose(0.0, 0.0, "start"))
+    track.add_keyframe(100, Pose(10.0, 20.0, "end"))
+
+    # At 25% of the segment: numeric fields linearly interpolated.
+    state.current_frame = 25
+    assert obj.pos.x == pytest.approx(2.5)
+    assert obj.pos.y == pytest.approx(5.0)
+    # String field: Step fallback — holds "start" until p >= 0.5
+    assert obj.pos.label == "start"
+
+    # At 60%: string flips to "end" via Step fallback.
+    state.current_frame = 60
+    assert obj.pos.x == pytest.approx(6.0)
+    assert obj.pos.label == "end"
+
+
+def test_model_field_step_fallback(qapp):
+    """Non-numeric fields silently fall back to Step even when Linear is set."""
+    from qt_animation_timeline.models import _interpolate_field
+
+    # Linear on strings should not raise; should behave as Step.
+    result_before = _interpolate_field(EasingFunction.Linear, 0.3, "a", "b")
+    result_after = _interpolate_field(EasingFunction.Linear, 0.6, "a", "b")
+    assert result_before == "a"
+    assert result_after == "b"
+
+
+    """Animation emits psygnal signals with no Qt dependency in signal logic."""
     state = AnimationState(track_options={"A": (object(), "x")})
 
+    # Scalar field signals are on .events.<name> (EventedModel style)
     frames = []
-    state.frame_changed.connect(frames.append)
+    state.events.current_frame.connect(frames.append)
     state.current_frame = 10
     assert frames == [10]
     state.current_frame = 10  # no duplicate
@@ -861,7 +906,7 @@ def test_animation_state_signals(qapp):
     assert len(removed) == 1 and removed[0] is track
 
     play_states = []
-    state.playing_changed.connect(play_states.append)
+    state.events.playing.connect(play_states.append)
     state.playing = True
     state.playing = True   # no duplicate
     state.playing = False
