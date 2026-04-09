@@ -6,7 +6,53 @@
 [![CI](https://github.com/brisvag/qt-animation-editor/qt-animation-editor/actions/workflows/ci.yml/badge.svg)](https://github.com/brisvag/qt-animation-editor/qt-animation-editor/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/brisvag/qt-animation-editor/qt-animation-editor/branch/main/graph/badge.svg)](https://codecov.io/gh/brisvag/qt-animation-editor/qt-animation-editor)
 
-Package description.
+A blender-style timeline widget for qt to edit animations.
+
+<img width="880" height="236" alt="image" src="https://github.com/user-attachments/assets/9a677340-55b3-4706-aa30-65d694b2c466" />
+
+## Usage
+
+The widget is designed to work with dataclass/pydantic style models directly.
+
+```py
+from pydantic import BaseModel
+
+class Circle(BaseModel):
+    color: tuple[int, int, int] = (255, 0, 0)
+    size: float = 10
+    filled: bool = True
+    other_stuff = ...
+
+circle = Circle()
+
+track_options = {
+    'color': (circle, 'color'),
+    'size': (circle, 'size')
+}
+
+timeline = AnimationTimelineWidget(track_options=track_options)
+```
+
+This will allow to animate the color and size, updating the model accordingly when the playhead scrubs along the animation.
+
+When a keyframe is created manually, it will inherit the current model value for the given attribute.
+
+Note that this also works for nested models whenever possible:
+
+```py
+class CircleSet(BaseModel):
+    circle1: Circle()
+    circle2: Circle()
+
+circleset = CircleSet()
+
+track_options = {
+    'circle 1': (circleset, 'circle1'),
+    'circle 2': (circleset, 'circle2')
+}
+```
+
+In this case, the whole model is considered the keyframe value, and all its elements will be interpolated.
 
 ## Development
 
