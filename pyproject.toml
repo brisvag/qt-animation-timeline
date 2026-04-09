@@ -63,7 +63,7 @@ dev = [
     { include-group = "test" },
     "ipython",
     "pdbpp",  # https://github.com/pdbpp/pdbpp
-    "pre-commit-uv",
+    "prek",
     "rich",  # https://github.com/Textualize/rich
     "ruff",
 ]
