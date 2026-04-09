@@ -5,8 +5,9 @@ Run with::
     python examples/demo.py
 
 The demo creates a ``Camera`` model and a ``Light`` model, each bound to a set
-of tracks.  Moving the playhead prints the current field values for both models
-to stdout so it is immediately clear which object each value belongs to.
+of tracks.  Moving the playhead, changing an easing function, or repositioning
+a keyframe all print the current field values for both models to stdout so it
+is immediately clear what caused each update.
 Requires NumPy (``pip install numpy``).
 """
 
@@ -54,7 +55,6 @@ def build_demo() -> tuple[QWidget, AnimationTimelineWidget, Camera, Light]:
         }
     )
 
-    # Add tracks pre-bound to the model fields.
     timeline.add_track("cam_x")
     timeline.add_track("cam_y")
     timeline.add_track("cam_zoom")
@@ -86,20 +86,24 @@ def build_demo() -> tuple[QWidget, AnimationTimelineWidget, Camera, Light]:
     timeline.tracks[4].add_keyframe(150, value=np.array([45.0, 90.0, 180.0]))
     timeline.tracks[4].add_keyframe(280, value=np.array([10.0, 20.0, 30.0]))
 
-    info_label = QLabel("Move the playhead to see values")
+    info_label = QLabel("Move the playhead, reposition a keyframe, or change an easing to see values")
     info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-    def _on_playhead(frame: int) -> None:
+    def _print_state(reason: str) -> None:
+        frame = timeline.current_frame
         angles_str = "[" + ", ".join(f"{a:.1f}" for a in light.angles) + "]"
         msg = (
-            f"frame={frame:4d}  |  "
+            f"[{reason}] frame={frame:4d}  |  "
             f"Camera: x={camera.x:8.2f}  y={camera.y:8.2f}  zoom={camera.zoom:.2f}  |  "
             f"Light: intensity={light.intensity:.2f}  angles={angles_str}"
         )
         print(msg)
         info_label.setText(msg)
 
-    timeline.playhead_moved.connect(_on_playhead)
+    timeline.playhead_moved.connect(lambda _: _print_state("playhead"))
+    timeline.keyframes_moved.connect(lambda _: _print_state("keyframe moved"))
+    timeline.easing_changed.connect(lambda _: _print_state("easing changed"))
+    timeline.keyframe_added.connect(lambda t, kf: _print_state("keyframe added"))
 
     main_widget = QWidget()
     layout = QVBoxLayout(main_widget)

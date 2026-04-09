@@ -13,7 +13,6 @@ from qt_animation_timeline.easing import EasingFunction, _coerce_value
 from qt_animation_timeline.editor import (
     _BUTTON_ICONS,
     _DEFAULT_COLORS,
-    _PLACEHOLDER_TRACK,
     _PLAY_LOOP,
     _PLAY_MODE_ICONS,
     _PLAY_NORMAL,
@@ -21,6 +20,7 @@ from qt_animation_timeline.editor import (
     AnimationTimelineWidget,
 )
 from qt_animation_timeline.models import Keyframe, Track
+from qt_animation_timeline.state import AnimationState, PLAY_LOOP, PLAY_NORMAL, PLAY_PINGPONG
 
 
 @pytest.fixture(scope="session")
@@ -30,6 +30,7 @@ def qapp():
 
 def test_imports_with_version():
     assert isinstance(qt_animation_timeline.__version__, str)
+    assert hasattr(qt_animation_timeline, "AnimationState")
 
 
 def test_easing_linear(qapp):
@@ -81,7 +82,8 @@ def test_track():
     t.add_keyframe(30)
     t.add_keyframe(5)
     assert [k.t for k in t.keyframes] == [5, 10, 30]
-    assert t.color.isValid()
+    assert len(t.color) == 3  # RGB tuple
+    assert all(isinstance(c, int) for c in t.color)
 
 
 def test_coordinate_roundtrip(qapp):
@@ -108,15 +110,11 @@ def test_add_track(qapp):
     assert received == [track]
 
 
-def test_add_track_placeholder(qapp):
-    w = AnimationTimelineWidget()
-    assert w.add_track().name == _PLACEHOLDER_TRACK
-
-
 def test_track_color_cycle(qapp):
     red = QColor(255, 0, 0)
     w = AnimationTimelineWidget(track_color_cycle=[red])
-    assert w.add_track("A").color == red
+    track = w.add_track("A")
+    assert track.color == (255, 0, 0)
 
 
 def test_easing_options_settable(qapp):
@@ -161,6 +159,7 @@ def test_keyframes_in_rect(qapp):
 def test_delete_keyframes(qapp):
     w = AnimationTimelineWidget()
     w.resize(800, 300)
+    w.track_options = {"A": (object(), "x")}
     w.add_track("A")
     kf = w.tracks[0].add_keyframe(10)
     w.selected_keyframes = [kf]
@@ -172,27 +171,8 @@ def test_delete_keyframes(qapp):
     assert removed == [[kf]]
 
 
-def test_placeholder_never_dispatched(qapp):
-    class Model:
-        v = 0.0
-
-    m = Model()
-    w = AnimationTimelineWidget()
-    w.track_options = {_PLACEHOLDER_TRACK: (m, "v")}
-    t = w.add_track()
-    assert t.name == _PLACEHOLDER_TRACK
-    t.add_keyframe(0, value=0.0)
-    t.add_keyframe(100, value=99.0)
-    w._set_playhead(50)
-    assert m.v == 0.0
-
-
 def _combo_options(w, track_index):
-    """Return ``{label: enabled}`` for the track-change combo of a given track.
-
-    Uses the public ``_get_track_change_options`` helper directly so no UI
-    mocking is required.
-    """
+    """Return ``{label: enabled}`` for the track-change combo of a given track."""
     if not (0 <= track_index < len(w.tracks)):
         return {}
     track = w.tracks[track_index]
@@ -205,14 +185,8 @@ def test_unique_track_options(qapp):
     w.add_track("A")
     w.add_track("B")
     options = _combo_options(w, 1)
-    assert options.get("A") is False  # A is used by track 0 → disabled for track 1
-
-    w2 = AnimationTimelineWidget()
-    w2.track_options = {"A": (object(), "x")}
-    w2.add_track("A")
-    w2.add_track("A")
-    options2 = _combo_options(w2, 1)
-    assert options2.get(_PLACEHOLDER_TRACK) is True  # placeholder always enabled
+    assert options.get("A") is False  # A is used by track 0 -> disabled for track 1
+    assert options.get("B") is True   # B is the current track's own name
 
 
 def _make_press(x, y, shift=False, button=Qt.MouseButton.LeftButton):
@@ -226,6 +200,7 @@ def test_rubber_band_selection(qapp):
     w.add_track("A")
     x = int(w.left_margin + 50)
     y = int(w.track_center_y(0))
+    # Shift+click starts rubber-band; plain click does not.
     w.mousePressEvent(_make_press(x, y, shift=True))
     assert w._box_start is not None
     w2 = AnimationTimelineWidget()
@@ -237,18 +212,18 @@ def test_rubber_band_selection(qapp):
 
 def test_interpolation(qapp):
     w = AnimationTimelineWidget()
+    w.track_options = {"A": (object(), "x")}
     w.add_track("A")
     track = w.tracks[0]
     assert w._interpolate_track(track, 50) is None
 
-    # single keyframe: value held everywhere
     track.add_keyframe(10, value=7.0)
     assert w._interpolate_track(track, 5) == pytest.approx(7.0)
     assert w._interpolate_track(track, 10) == pytest.approx(7.0)
     assert w._interpolate_track(track, 20) == pytest.approx(7.0)
 
-    # linear interpolation with fresh widget
     w2 = AnimationTimelineWidget()
+    w2.track_options = {"A": (object(), "x")}
     w2.add_track("A")
     w2.tracks[0].add_keyframe(0, value=0.0)
     w2.tracks[0].add_keyframe(100, value=10.0)
@@ -258,6 +233,7 @@ def test_interpolation(qapp):
 
     # clamp before first keyframe
     w3 = AnimationTimelineWidget()
+    w3.track_options = {"A": (object(), "x")}
     w3.add_track("A")
     w3.tracks[0].add_keyframe(50, value=3.0)
     w3.tracks[0].add_keyframe(100, value=6.0)
@@ -266,6 +242,7 @@ def test_interpolation(qapp):
 
 def test_interpolation_step_easing(qapp):
     w = AnimationTimelineWidget()
+    w.track_options = {"A": (object(), "x")}
     w.add_track("A")
     w.tracks[0].add_keyframe(0, value=0.0, easing=EasingFunction.Step)
     w.tracks[0].add_keyframe(100, value=1.0)
@@ -276,6 +253,7 @@ def test_interpolation_step_easing(qapp):
 
 def test_interpolation_zero_span(qapp):
     w = AnimationTimelineWidget()
+    w.track_options = {"A": (object(), "x")}
     w.add_track("A")
     k1 = w.tracks[0].add_keyframe(50, value=1.0)
     k2 = w.tracks[0].add_keyframe(100, value=9.0)
@@ -286,33 +264,30 @@ def test_interpolation_zero_span(qapp):
 def test_segment_left_keyframe(qapp):
     w = AnimationTimelineWidget()
     w.resize(800, 300)
+    w.track_options = {"A": (object(), "x")}
     w.add_track("A")
     k1 = w.tracks[0].add_keyframe(0)
     w.tracks[0].add_keyframe(100)
-    k_last = w.tracks[0].add_keyframe(50)
-    # remove k_last from above and redo cleanly
+    x = int(w.frame_to_x(50))
+    y = int(w.track_center_y(0))
+    assert w._segment_left_keyframe_at(x, y) is k1
+
     w2 = AnimationTimelineWidget()
     w2.resize(800, 300)
+    w2.track_options = {"A": (object(), "x")}
     w2.add_track("A")
-    k1 = w2.tracks[0].add_keyframe(0)
-    w2.tracks[0].add_keyframe(100)
-    x = int(w2.frame_to_x(50))
-    y = int(w2.track_center_y(0))
-    assert w2._segment_left_keyframe_at(x, y) is k1
+    w2.tracks[0].add_keyframe(0)
+    k_last = w2.tracks[0].add_keyframe(50)
+    x2 = int(w2.frame_to_x(80))
+    y2 = int(w2.track_center_y(0))
+    assert w2._segment_left_keyframe_at(x2, y2) is k_last
 
+    # empty track returns None
     w3 = AnimationTimelineWidget()
     w3.resize(800, 300)
+    w3.track_options = {"A": (object(), "x")}
     w3.add_track("A")
-    w3.tracks[0].add_keyframe(0)
-    k_last = w3.tracks[0].add_keyframe(50)
-    x = int(w3.frame_to_x(80))
-    y = int(w3.track_center_y(0))
-    assert w3._segment_left_keyframe_at(x, y) is k_last
-
-    w4 = AnimationTimelineWidget()
-    w4.resize(800, 300)
-    w4.add_track("A")
-    assert w4._segment_left_keyframe_at(int(w4.frame_to_x(10)), int(w4.track_center_y(0))) is None
+    assert w3._segment_left_keyframe_at(int(w3.frame_to_x(10)), int(w3.track_center_y(0))) is None
 
 
 def test_track_model_dispatch(qapp):
@@ -348,9 +323,10 @@ def test_track_model_dispatch(qapp):
     w3._set_playhead(50)
     assert m.flag is True
 
+    # unbound track (no matching option) should not dispatch
     w4 = AnimationTimelineWidget()
     w4.track_options = {"A": (m, "x")}
-    w4.add_track("B")
+    w4.add_track("B")  # "B" has no binding
     w4.tracks[0].add_keyframe(0, value=0.0)
     w4.tracks[0].add_keyframe(100, value=10.0)
     m.x = 0.0
@@ -358,7 +334,7 @@ def test_track_model_dispatch(qapp):
     assert m.x == 0.0
 
 
-def test_dispatch_on_easing_change(qapp):
+def test_dispatch_on_easing_and_keyframe_change(qapp):
     class Model:
         x = 0.0
 
@@ -370,92 +346,36 @@ def test_dispatch_on_easing_change(qapp):
     w.tracks[0].add_keyframe(100, value=10.0)
     w._set_playhead(50)
     assert m.x == pytest.approx(5.0)
+
+    # Changing easing should re-dispatch.
     w.tracks[0].keyframes[0].easing = EasingFunction.Step
     w._dispatch_track_callbacks(w.current_frame)
     assert m.x == pytest.approx(10.0)
 
-
-def test_dispatch_on_keyframe_add(qapp):
-    class Model:
-        x = 0.0
-
-    m = Model()
-    w = AnimationTimelineWidget()
-    w.track_options = {"A": (m, "x")}
-    w.add_track("A")
-    w.tracks[0].add_keyframe(0, value=0.0)
-    w.tracks[0].add_keyframe(100, value=10.0)
-    w._set_playhead(50)
-    w.tracks[0].add_keyframe(50, value=99.0)
-    w._dispatch_track_callbacks(w.current_frame)
+    # Adding a keyframe at the playhead should re-dispatch.
+    w.state.add_keyframe(w.tracks[0], 50, value=99.0)
     assert m.x == pytest.approx(99.0)
-
-
-def test_dispatch_on_keyframe_delete(qapp):
-    class Model:
-        x = 0.0
-
-    m = Model()
-    w = AnimationTimelineWidget()
-    w.resize(800, 300)
-    w.track_options = {"A": (m, "x")}
-    w.add_track("A")
-    w.tracks[0].add_keyframe(0, value=0.0)
-    # Keyframe at frame 50 pins model to 5.0 via linear interpolation to 100.
-    kf_mid = w.tracks[0].add_keyframe(50, value=5.0)
-    w.tracks[0].add_keyframe(100, value=10.0)
-    w._set_playhead(50)
-    assert m.x == pytest.approx(5.0)
-
-    # Delete the middle keyframe via the keyboard shortcut.
-    w.selected_keyframes = [kf_mid]
-    press = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier)
-    w.keyPressEvent(press)
-
-    # After deletion the playhead is at 50 between kf(0,0) and kf(100,10):
-    # linear interpolation gives 5.0, same value but reached via different path.
-    # More importantly the model must have been re-dispatched (not stale).
-    assert m.x == pytest.approx(5.0)
-
-
-def test_keyframe_value_capture(qapp):
-    class Model:
-        x = 42.0
-
-    m = Model()
-    w = AnimationTimelineWidget()
-    w.resize(800, 300)
-    w.track_options = {"A": (m, "x")}
-    w.add_track("A")
-    track = w.tracks[0]
-    binding = w.track_options.get(track.name)
-    assert binding is not None
-    kf = track.add_keyframe(50, value=getattr(*binding))
-    assert kf.value == pytest.approx(42.0)
-
-    w2 = AnimationTimelineWidget()
-    w2.resize(800, 300)
-    w2.add_track()
-    track2 = w2.tracks[0]
-    binding2 = w2.track_options.get(track2.name)
-    initial_value = getattr(*binding2) if binding2 else 0
-    assert initial_value == 0
 
 
 def test_can_add_track(qapp):
     w = AnimationTimelineWidget()
-    assert w._can_add_track() is True
-
-    w.track_options = {"A": (object(), "x"), "B": (object(), "y")}
-    w.add_track("A")
-    assert w._can_add_track() is True
+    # No track_options -> cannot add (popup has nothing to show)
+    assert w._can_add_track() is False
 
     w2 = AnimationTimelineWidget()
-    w2.track_options = {"A": (object(), "x")}
+    w2.track_options = {"A": (object(), "x"), "B": (object(), "y")}
+    assert w2._can_add_track() is True
     w2.add_track("A")
-    assert w2._can_add_track() is False
-    w2.add_track()  # placeholder doesn't consume a slot
-    assert w2._can_add_track() is False
+    assert w2._can_add_track() is True  # B still available
+    w2.add_track("B")
+    assert w2._can_add_track() is False  # all used
+
+
+def test_available_track_options(qapp):
+    state = AnimationState(track_options={"A": (object(), "x"), "B": (object(), "y")})
+    state.add_track("A")
+    avail = state.available_track_options()
+    assert "B" in avail and "A" not in avail
 
 
 def test_zoom_step(qapp):
@@ -484,17 +404,16 @@ def test_easing_preselection(qapp):
     w.track_options = {"flag": (m, "flag"), "x": (m, "x")}
     t_bool = w.add_track("flag")
     t_float = w.add_track("x")
-    t_ph = w.add_track()
 
     assert w._get_allowed_easings_for_track(t_bool) == [EasingFunction.Step]
     allowed_float = w._get_allowed_easings_for_track(t_float)
     assert EasingFunction.Linear in allowed_float and EasingFunction.Step in allowed_float
-    assert set(w._get_allowed_easings_for_track(t_ph)) == set(EasingFunction)
 
 
 def test_right_double_click_ignored(qapp):
     w = AnimationTimelineWidget()
     w.resize(800, 300)
+    w.track_options = {"A": (object(), "x")}
     w.add_track("A")
     x = int(w.frame_to_x(50))
     y = int(w.track_center_y(0))
@@ -512,21 +431,21 @@ def test_right_double_click_ignored(qapp):
 def test_is_on_track_line(qapp):
     w = AnimationTimelineWidget()
     w.resize(800, 300)
+    w.track_options = {"A": (object(), "x")}
     w.add_track("A")
     cy = w.track_center_y(0)
     x = int(w.frame_to_x(10))
     assert w._is_on_track_line(x, int(cy)) is True
     assert w._is_on_track_line(x, int(cy) + w.track_height) is False
     assert w._is_on_track_line(x, int(cy) + w.line_thickness + 4) is True
-
-    w2 = AnimationTimelineWidget()
-    w2.resize(800, 300)
-    assert w2._is_on_track_line(200, 60) is False
+    # No tracks: always False
+    assert AnimationTimelineWidget()._is_on_track_line(200, 60) is False
 
 
 def test_reset_view(qapp):
     w = AnimationTimelineWidget()
     w.resize(800, 300)
+    w.track_options = {"A": (object(), "x")}
     w.add_track("A")
     w.tracks[0].add_keyframe(0, value=0.0)
     w.tracks[0].add_keyframe(200, value=1.0)
@@ -566,6 +485,7 @@ def test_numpy_interpolation(qapp):
     np.testing.assert_allclose(_coerce_value(arr, arr * 2), [2.0, 4.0, 6.0])
 
     w = AnimationTimelineWidget()
+    w.track_options = {"A": (object(), "angles")}
     w.add_track("A")
     w.tracks[0].add_keyframe(0, value=np.array([0.0, 0.0]))
     w.tracks[0].add_keyframe(100, value=np.array([10.0, 20.0]))
@@ -593,7 +513,7 @@ def test_constructor_kwargs(qapp):
         assert hasattr(AnimationTimelineWidget(), key)
 
     w2 = AnimationTimelineWidget(track_color_cycle=[red])
-    assert w2.add_track("A").color == red
+    assert w2.add_track("A").color == (255, 0, 0)
 
     class Model:
         x = 0.0
@@ -625,60 +545,60 @@ def test_arrow_keys(qapp):
 
 
 def test_play_modes(qapp):
-    w = AnimationTimelineWidget()
-    assert w._play_mode == _PLAY_NORMAL
-    w._cycle_play_mode()
-    assert w._play_mode == _PLAY_LOOP
-    w._cycle_play_mode()
-    assert w._play_mode == _PLAY_PINGPONG
-    w._cycle_play_mode()
-    assert w._play_mode == _PLAY_NORMAL
+    state = AnimationState()
+    assert state.play_mode == PLAY_NORMAL
+    state.cycle_play_mode()
+    assert state.play_mode == PLAY_LOOP
+    state.cycle_play_mode()
+    assert state.play_mode == PLAY_PINGPONG
+    state.cycle_play_mode()
+    assert state.play_mode == PLAY_NORMAL
 
 
 def test_play_normal_stops_at_last_keyframe(qapp):
-    w = AnimationTimelineWidget()
-    w.add_track("A")
-    w.tracks[0].add_keyframe(0, value=0.0)
-    w.tracks[0].add_keyframe(5, value=1.0)
-    w._play_mode = _PLAY_NORMAL
-    w._start_playback()
-    w._set_playhead(5)
-    w._advance_playhead()
-    assert not w._playing and w.current_frame == 5
+    state = AnimationState()
+    state.add_track("A")
+    state.tracks[0].add_keyframe(0, value=0.0)
+    state.tracks[0].add_keyframe(5, value=1.0)
+    state.play_mode = PLAY_NORMAL
+    state.playing = True
+    state.current_frame = 5
+    state.advance_playhead()
+    assert not state.playing and state.current_frame == 5
 
 
 def test_play_loop_wraps(qapp):
-    w = AnimationTimelineWidget()
-    w.add_track("A")
-    w.tracks[0].add_keyframe(0, value=0.0)
-    w.tracks[0].add_keyframe(5, value=1.0)
-    w._play_mode = _PLAY_LOOP
-    w._set_playhead(5)
-    w._advance_playhead()
-    assert w.current_frame == 0
+    state = AnimationState()
+    state.add_track("A")
+    state.tracks[0].add_keyframe(0, value=0.0)
+    state.tracks[0].add_keyframe(5, value=1.0)
+    state.play_mode = PLAY_LOOP
+    state.current_frame = 5
+    state.advance_playhead()
+    assert state.current_frame == 0
 
 
 def test_play_pingpong_reverses(qapp):
-    w = AnimationTimelineWidget()
-    w.add_track("A")
-    w.tracks[0].add_keyframe(0, value=0.0)
-    w.tracks[0].add_keyframe(5, value=1.0)
-    w._play_mode = _PLAY_PINGPONG
-    w._play_direction = 1
-    w._set_playhead(5)
-    w._advance_playhead()
-    assert w._play_direction == -1
-    w._set_playhead(0)
-    w._advance_playhead()
-    assert w._play_direction == 1
+    state = AnimationState()
+    state.add_track("A")
+    state.tracks[0].add_keyframe(0, value=0.0)
+    state.tracks[0].add_keyframe(5, value=1.0)
+    state.play_mode = PLAY_PINGPONG
+    state._play_direction = 1
+    state.current_frame = 5
+    state.advance_playhead()
+    assert state._play_direction == -1
+    state.current_frame = 0
+    state.advance_playhead()
+    assert state._play_direction == 1
 
 
 def test_play_no_keyframes(qapp):
-    w = AnimationTimelineWidget()
-    w._play_mode = _PLAY_NORMAL
-    w._start_playback()
-    w._advance_playhead()
-    assert not w._playing
+    state = AnimationState()
+    state.play_mode = PLAY_NORMAL
+    state.playing = True
+    state.advance_playhead()
+    assert not state.playing
 
 
 def test_loop_btn_color_distinct(qapp):
@@ -690,12 +610,9 @@ def test_loop_btn_color_distinct(qapp):
 
 
 def test_play_mode_icons():
-    # Every play mode must have an icon defined in _BUTTON_ICONS.
     for key in _PLAY_MODE_ICONS.values():
         assert key in _BUTTON_ICONS
-    # Each mode maps to a distinct icon.
     assert len(set(_PLAY_MODE_ICONS.values())) == len(_PLAY_MODE_ICONS)
-    # Normal mode is not the loop or pingpong icon.
     assert _PLAY_MODE_ICONS[_PLAY_NORMAL] not in (
         _PLAY_MODE_ICONS[_PLAY_LOOP],
         _PLAY_MODE_ICONS[_PLAY_PINGPONG],
@@ -709,43 +626,25 @@ def test_playback_speed(qapp):
     assert w.playback_speed == 0.5
 
 
-# ------------------------------------------------------------------ #
-# Auto-adjust left column width                                        #
-# ------------------------------------------------------------------ #
-
 def test_left_margin_auto_adjusts(qapp):
     w = AnimationTimelineWidget()
     w.resize(800, 300)
-    # No tracks: stays at minimum.
-    assert w.left_margin == w._left_margin_min
+    assert w.left_margin == w._left_margin_min  # no tracks: stays at minimum
 
+    w.track_options = {"A": (object(), "x")}
     w.add_track("A")
     w.update_scrollbars()
     margin_short = w.left_margin
 
+    w.track_options = {"A": (object(), "x"), "A very long track label name": (object(), "y")}
     w.add_track("A very long track label name")
     w.update_scrollbars()
     margin_long = w.left_margin
 
-    assert margin_long > margin_short
-    assert margin_long >= w._left_margin_min
+    assert margin_long > margin_short >= w._left_margin_min
 
-
-def test_left_margin_minimum_respected(qapp):
-    w = AnimationTimelineWidget()
-    w.resize(800, 300)
-    # Even with a short label, margin never drops below the minimum.
-    w.add_track("X")
-    w.update_scrollbars()
-    assert w.left_margin >= w._left_margin_min
-
-
-# ------------------------------------------------------------------ #
-# list / tuple value handling                                          #
-# ------------------------------------------------------------------ #
 
 def test_coerce_value_list(qapp):
-    from qt_animation_timeline.easing import _coerce_value
     ref = [1.0, 2.0, 3.0]
     result = _coerce_value(ref, np.array([1.5, 2.5, 3.5]))
     assert isinstance(result, list)
@@ -753,75 +652,52 @@ def test_coerce_value_list(qapp):
 
 
 def test_coerce_value_tuple(qapp):
-    from qt_animation_timeline.easing import _coerce_value
     ref = (1.0, 2.0)
     result = _coerce_value(ref, np.array([0.5, 1.5]))
-    assert isinstance(result, tuple)
-    assert result == pytest.approx((0.5, 1.5))
+    assert isinstance(result, tuple) and result == pytest.approx((0.5, 1.5))
 
 
 def test_coerce_value_nested_list(qapp):
-    from qt_animation_timeline.easing import _coerce_value
     ref = [[1.0, 2.0], [3.0, 4.0]]
     result = _coerce_value(ref, np.array([[1.5, 2.5], [3.5, 4.5]]))
-    assert isinstance(result, list)
-    assert isinstance(result[0], list)
+    assert isinstance(result, list) and isinstance(result[0], list)
     assert result[0] == pytest.approx([1.5, 2.5])
     assert result[1] == pytest.approx([3.5, 4.5])
 
 
-def test_interpolate_list_values(qapp):
+def test_interpolate_list_and_tuple_values(qapp):
     w = AnimationTimelineWidget()
+    w.track_options = {"A": (object(), "x"), "B": (object(), "y")}
     w.add_track("A")
     w.tracks[0].add_keyframe(0, value=[0.0, 0.0])
     w.tracks[0].add_keyframe(100, value=[10.0, 20.0])
-    result = w._interpolate_track(w.tracks[0], 50)
-    assert result == pytest.approx([5.0, 10.0])
+    assert w._interpolate_track(w.tracks[0], 50) == pytest.approx([5.0, 10.0])
 
-
-def test_interpolate_tuple_values(qapp):
-    w = AnimationTimelineWidget()
-    w.add_track("A")
-    w.tracks[0].add_keyframe(0, value=(0.0, 100.0))
-    w.tracks[0].add_keyframe(100, value=(100.0, 0.0))
-    # _interpolate_track converts to numpy for arithmetic; dispatch casts back to tuple.
-    result = w._interpolate_track(w.tracks[0], 50)
+    w.add_track("B")
+    w.tracks[1].add_keyframe(0, value=(0.0, 100.0))
+    w.tracks[1].add_keyframe(100, value=(100.0, 0.0))
+    result = w._interpolate_track(w.tracks[1], 50)
     np.testing.assert_allclose(result, [50.0, 50.0])
 
 
-def test_dispatch_list_cast_back(qapp):
+def test_dispatch_list_and_tuple_cast_back(qapp):
     class Model:
-        pos = [0.0, 0.0]
+        pos_list = [0.0, 0.0]
+        pos_tuple = (0.0, 0.0)
 
     m = Model()
     w = AnimationTimelineWidget()
-    w.track_options = {"A": (m, "pos")}
+    w.track_options = {"A": (m, "pos_list"), "B": (m, "pos_tuple")}
     w.add_track("A")
     w.tracks[0].add_keyframe(0, value=[0.0, 0.0])
     w.tracks[0].add_keyframe(100, value=[10.0, 20.0])
+    w.add_track("B")
+    w.tracks[1].add_keyframe(0, value=(0.0, 0.0))
+    w.tracks[1].add_keyframe(100, value=(10.0, 20.0))
     w._set_playhead(50)
-    assert isinstance(m.pos, list)
-    assert m.pos == pytest.approx([5.0, 10.0])
+    assert isinstance(m.pos_list, list) and m.pos_list == pytest.approx([5.0, 10.0])
+    assert isinstance(m.pos_tuple, tuple) and m.pos_tuple == pytest.approx((5.0, 10.0))
 
-
-def test_dispatch_tuple_cast_back(qapp):
-    class Model:
-        pos = (0.0, 0.0)
-
-    m = Model()
-    w = AnimationTimelineWidget()
-    w.track_options = {"A": (m, "pos")}
-    w.add_track("A")
-    w.tracks[0].add_keyframe(0, value=(0.0, 0.0))
-    w.tracks[0].add_keyframe(100, value=(10.0, 20.0))
-    w._set_playhead(50)
-    assert isinstance(m.pos, tuple)
-    assert m.pos == pytest.approx((5.0, 10.0))
-
-
-# ------------------------------------------------------------------ #
-# Pydantic / dataclass dispatch                                        #
-# ------------------------------------------------------------------ #
 
 def test_dispatch_dataclass(qapp):
     import dataclasses
@@ -843,10 +719,8 @@ def test_dispatch_dataclass(qapp):
     w.tracks[0].add_keyframe(0, value=Pose(x=0.0, y=0.0), easing=EasingFunction.Step)
     w.tracks[0].add_keyframe(100, value=Pose(x=10.0, y=20.0))
     w._set_playhead(50)
-    # Step easing at p=0.5 → second keyframe value applied in-place.
     assert m.state is pose  # updated in-place, not replaced
-    assert m.state.x == pytest.approx(10.0)
-    assert m.state.y == pytest.approx(20.0)
+    assert m.state.x == pytest.approx(10.0) and m.state.y == pytest.approx(20.0)
 
 
 def test_dispatch_dataclass_skips_properties(qapp):
@@ -872,7 +746,6 @@ def test_dispatch_dataclass_skips_properties(qapp):
     w.add_track("A")
     w.tracks[0].add_keyframe(0, value=Rect(w=2.0, h=3.0), easing=EasingFunction.Step)
     w.tracks[0].add_keyframe(100, value=Rect(w=4.0, h=6.0))
-    # Should not raise even though 'area' is a property.
     w._set_playhead(50)
     assert m.shape.w == pytest.approx(4.0)
 
@@ -901,29 +774,21 @@ def test_dispatch_dataclass_with_update_method(qapp):
     w.tracks[0].add_keyframe(0, value=Config(speed=1.0, enabled=True), easing=EasingFunction.Step)
     w.tracks[0].add_keyframe(100, value=Config(speed=5.0, enabled=False))
     w._set_playhead(50)
-    assert m.config is cfg  # same object
-    assert m.config.speed == pytest.approx(5.0)
+    assert m.config is cfg and m.config.speed == pytest.approx(5.0)
 
-
-# ------------------------------------------------------------------ #
-# track_options cleanup                                                #
-# ------------------------------------------------------------------ #
 
 def test_track_removed_when_option_deleted(qapp):
     w = AnimationTimelineWidget()
     w.track_options = {"A": (object(), "x"), "B": (object(), "y")}
     w.add_track("A")
     w.add_track("B")
-    assert len(w.tracks) == 2
 
     removed = []
     w.track_removed.connect(removed.append)
     del w.track_options["B"]
 
-    assert len(w.tracks) == 1
-    assert w.tracks[0].name == "A"
-    assert len(removed) == 1
-    assert removed[0].name == "B"
+    assert len(w.tracks) == 1 and w.tracks[0].name == "A"
+    assert len(removed) == 1 and removed[0].name == "B"
 
 
 def test_track_removed_on_options_reassign(qapp):
@@ -936,25 +801,11 @@ def test_track_removed_on_options_reassign(qapp):
     w.track_removed.connect(removed.append)
     w.track_options = {"A": (object(), "x")}
 
-    assert len(w.tracks) == 1
-    assert w.tracks[0].name == "A"
+    assert len(w.tracks) == 1 and w.tracks[0].name == "A"
     assert len(removed) == 1
 
 
-def test_placeholder_kept_on_options_cleanup(qapp):
-    w = AnimationTimelineWidget()
-    w.track_options = {"A": (object(), "x")}
-    w.add_track("A")
-    w.add_track()  # placeholder "..."
-
-    del w.track_options["A"]
-
-    names = {t.name for t in w.tracks}
-    assert _PLACEHOLDER_TRACK in names
-    assert "A" not in names
-
-
-def test_track_options_pop(qapp):
+def test_track_options_pop_and_clear(qapp):
     w = AnimationTimelineWidget()
     w.track_options = {"A": (object(), "x"), "B": (object(), "y")}
     w.add_track("A")
@@ -962,18 +813,8 @@ def test_track_options_pop(qapp):
     w.track_options.pop("A")
     assert all(t.name != "A" for t in w.tracks)
 
-
-def test_track_options_clear(qapp):
-    # clear() removes all keys → all named tracks that had an option are removed.
-    # Placeholder tracks are always kept.
-    w = AnimationTimelineWidget()
-    w.track_options = {"A": (object(), "x")}
-    w.add_track("A")
-    w.add_track()  # placeholder "..."
     w.track_options.clear()
-    names = {t.name for t in w.tracks}
-    assert "A" not in names
-    assert _PLACEHOLDER_TRACK in names
+    assert len(w.tracks) == 0
 
 
 def test_selected_keyframes_cleared_on_cleanup(qapp):
@@ -986,20 +827,75 @@ def test_selected_keyframes_cleared_on_cleanup(qapp):
     assert kf not in w.selected_keyframes
 
 
-# ------------------------------------------------------------------ #
-# Size hints                                                           #
-# ------------------------------------------------------------------ #
-
 def test_size_hint(qapp):
     from qtpy.QtCore import QSize
+
     w = AnimationTimelineWidget()
     sh = w.sizeHint()
     msh = w.minimumSizeHint()
-    # sizeHint fits ≥4 tracks (height) and ≥50 frames (width).
     assert sh.height() >= w.top_margin + 4 * w.track_height
     assert sh.width() > w._left_margin_min
-    # minimumSizeHint is strictly smaller in both dimensions.
-    assert msh.width() <= sh.width()
-    assert msh.height() <= sh.height()
-    assert isinstance(sh, QSize)
-    assert isinstance(msh, QSize)
+    assert msh.width() <= sh.width() and msh.height() <= sh.height()
+    assert isinstance(sh, QSize) and isinstance(msh, QSize)
+
+
+def test_animation_state_signals(qapp):
+    """AnimationState emits psygnal signals with no Qt dependency in signal logic."""
+    state = AnimationState(track_options={"A": (object(), "x")})
+
+    frames = []
+    state.frame_changed.connect(frames.append)
+    state.current_frame = 10
+    assert frames == [10]
+    state.current_frame = 10  # no duplicate
+    assert frames == [10]
+
+    tracks_added = []
+    state.track_added.connect(tracks_added.append)
+    track = state.add_track("A")
+    assert len(tracks_added) == 1 and tracks_added[0] is track
+
+    removed = []
+    state.track_removed.connect(removed.append)
+    state.remove_track(track)
+    assert len(removed) == 1 and removed[0] is track
+
+    play_states = []
+    state.playing_changed.connect(play_states.append)
+    state.playing = True
+    state.playing = True   # no duplicate
+    state.playing = False
+    assert play_states == [True, False]
+
+
+def test_state_keyframe_signals(qapp):
+    class Model:
+        x = 0.0
+
+    m = Model()
+    state = AnimationState(track_options={"A": (m, "x")})
+    track = state.add_track("A")
+
+    kf_events = []
+    state.keyframe_added.connect(lambda t, kf: kf_events.append((t, kf)))
+    kf = state.add_keyframe(track, 10, value=5.0)
+    assert len(kf_events) == 1 and kf_events[0] == (track, kf)
+
+    removed_events = []
+    state.keyframes_removed.connect(removed_events.append)
+    state.remove_keyframes([kf])
+    assert removed_events == [[kf]]
+
+    moved_events = []
+    state.keyframes_moved.connect(moved_events.append)
+    kf2 = state.add_keyframe(track, 20, value=3.0)
+    kf2.t = 30
+    state.notify_keyframes_moved([kf2])
+    assert moved_events == [[kf2]]
+
+    easing_events = []
+    state.easing_changed.connect(easing_events.append)
+    kf3 = state.add_keyframe(track, 50, value=1.0)
+    kf3.easing = EasingFunction.Step
+    state.notify_easing_changed([kf3])
+    assert easing_events == [[kf3]]

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from qtpy.QtGui import QColor
-
 from qt_animation_timeline.easing import EasingFunction
 
 
@@ -20,16 +18,23 @@ class Keyframe:
     ) -> None:
         self.t = max(0, int(t))
         self.value = value
-        # Controls the interpolation curve from this keyframe to the *next* one.
         self.easing = easing
 
 
 class Track:
-    """A named animation track holding an ordered list of keyframes."""
+    """A named animation track holding an ordered list of keyframes.
 
-    def __init__(self, name: str, color: QColor | None = None) -> None:
+    Parameters
+    ----------
+    name:
+        Display name for the track.
+    color:
+        RGB colour as an ``(r, g, b)`` tuple.  Defaults to ``(180, 180, 180)``.
+    """
+
+    def __init__(self, name: str, color: tuple[int, int, int] | None = None) -> None:
         self.name = name
-        self.color = color or QColor(180, 180, 180)
+        self.color: tuple[int, int, int] = color or (180, 180, 180)
         self.keyframes: list[Keyframe] = []
 
     def add_keyframe(
