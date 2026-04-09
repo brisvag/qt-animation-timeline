@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import dataclasses
 import itertools
 import math
 from typing import Any
 
-import numpy as np
 from qtpy.QtCore import QByteArray, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
 from qtpy.QtGui import (
     QColor,
@@ -23,30 +21,35 @@ from qtpy.QtSvg import QSvgRenderer
 from qtpy.QtWidgets import QMenu, QScrollBar, QToolTip, QVBoxLayout, QWidget
 from superqt import QSearchableComboBox
 
-from qt_animation_timeline.easing import EasingFunction, _coerce_value
-from qt_animation_timeline.models import Keyframe, Track
+from qt_animation_timeline.easing import EasingFunction
+from qt_animation_timeline.models import (
+    PLAY_LOOP,
+    PLAY_NORMAL,
+    PLAY_PINGPONG,
+    Animation,
+    Keyframe,
+    Track,
+)
 
-# Special placeholder track name — always available and never unique-enforced.
-_PLACEHOLDER_TRACK = "..."
+# Aliases kept for any code that imports these names from this module.
+_PLAY_NORMAL = PLAY_NORMAL
+_PLAY_LOOP = PLAY_LOOP
+_PLAY_PINGPONG = PLAY_PINGPONG
 
-# Default frame width in pixels (used by reset-view).
 _DEFAULT_FRAME_WIDTH: float = 15.0
-
-# Multiplicative zoom factor per scroll step (Ctrl+wheel).
 _ZOOM_FACTOR: float = 1.15
 
 # Okabe-Ito colorblind-friendly palette (seven distinguishable colors).
 _DEFAULT_TRACK_COLORS = [
-    QColor(0, 114, 178),  # blue
-    QColor(230, 159, 0),  # orange
-    QColor(0, 158, 115),  # bluish green
-    QColor(86, 180, 233),  # sky blue
-    QColor(213, 94, 0),  # vermilion
-    QColor(240, 228, 66),  # yellow
+    QColor(0, 114, 178),    # blue
+    QColor(230, 159, 0),    # orange
+    QColor(0, 158, 115),    # bluish green
+    QColor(86, 180, 233),   # sky blue
+    QColor(213, 94, 0),     # vermilion
+    QColor(240, 228, 66),   # yellow
     QColor(204, 121, 167),  # reddish purple
 ]
 
-# Default values for all configurable colors.
 _DEFAULT_COLORS: dict[str, QColor] = {
     "bg_color": QColor(30, 30, 30),
     "track_bg_color": QColor(50, 50, 50),
@@ -66,19 +69,13 @@ _DEFAULT_COLORS: dict[str, QColor] = {
     "keyframe_selected_border_color": QColor(255, 255, 0),
 }
 
-# Play-mode constants.
-_PLAY_NORMAL = 0
-_PLAY_LOOP = 1
-_PLAY_PINGPONG = 2
-# Icon keys (into _BUTTON_ICONS) for each play mode shown on the mode-toggle button.
 _PLAY_MODE_ICONS = {
-    _PLAY_NORMAL: "play_once",
-    _PLAY_LOOP: "loop",
-    _PLAY_PINGPONG: "pingpong",
+    PLAY_NORMAL: "play_once",
+    PLAY_LOOP: "loop",
+    PLAY_PINGPONG: "pingpong",
 }
 
 # SVG path data (Material Design, viewBox "0 0 24 24") for every button icon.
-# Paths are filled shapes — colour is injected at render time via _render_svg_icon.
 _BUTTON_ICONS: dict[str, str] = {
     "home":      "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z",
     "play":      "M8 5v14l11-7z",
@@ -95,9 +92,7 @@ def _render_svg_icon(painter: QPainter, rect: QRect, icon_key: str, color: QColo
     """Render a named SVG icon centred within *rect* using *color* as the fill.
 
     The icon is always drawn as a square region centred inside *rect* so that
-    non-square buttons (e.g. the wide add-track row) don't stretch the shape.
-    The icon path is looked up from ``_BUTTON_ICONS`` and rendered via
-    ``QSvgRenderer`` so that it scales cleanly at any button size.
+    non-square buttons don't stretch the shape.
     """
     path_d = _BUTTON_ICONS[icon_key]
     hex_color = color.name()
@@ -107,7 +102,6 @@ def _render_svg_icon(painter: QPainter, rect: QRect, icon_key: str, color: QColo
         f"</svg>"
     )
     renderer = QSvgRenderer(QByteArray(svg.encode()))
-    # Compute a square sub-rect centred in the button; padding scales with size.
     side = min(rect.width(), rect.height())
     pad = max(2, side // 6)
     icon_side = side - 2 * pad
@@ -117,94 +111,13 @@ def _render_svg_icon(painter: QPainter, rect: QRect, icon_key: str, color: QColo
     renderer.render(painter, icon_rect)
 
 
-# Sentinel for "attribute not found" in _apply_model_value.
-_MISSING = object()
-
-
-def _is_model_instance(obj: Any) -> bool:
-    """Return ``True`` if *obj* is a pydantic model or dataclass instance."""
-    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        return True
-    # pydantic v2 has model_dump; pydantic v1 has dict + __fields__.
-    return hasattr(obj, "model_dump") or (
-        hasattr(obj, "dict") and hasattr(obj, "__fields__")
-    )
-
-
-def _apply_model_value(target: Any, source: Any) -> None:
-    """Apply pydantic/dataclass field values from *source* to *target* in-place.
-
-    Prefers a user-supplied ``update(dict)`` method (same signature as
-    ``dict.update``).  Falls back to field-by-field ``setattr``, skipping
-    computed fields (properties) and recursing into nested models.  Frozen
-    models / dataclasses silently ignore unwritable fields.
-    """
-    if hasattr(source, "model_dump"):
-        data = source.model_dump()
-    elif hasattr(source, "dict") and hasattr(source, "__fields__"):
-        data = source.dict()  # pydantic v1
-    elif dataclasses.is_dataclass(source) and not isinstance(source, type):
-        data = {f.name: getattr(source, f.name) for f in dataclasses.fields(source)}
-    else:
-        return
-
-    if hasattr(target, "update") and callable(getattr(target, "update")):
-        target.update(data)
-        return
-
-    for key, val in data.items():
-        # Skip computed fields (properties) on the target class.
-        if isinstance(getattr(type(target), key, None), property):
-            continue
-        existing = getattr(target, key, _MISSING)
-        try:
-            if existing is not _MISSING and _is_model_instance(existing) and _is_model_instance(val):
-                _apply_model_value(existing, val)
-            else:
-                setattr(target, key, val)
-        except (AttributeError, TypeError):
-            pass
-
-
-class _TrackOptionsDict(dict):
-    """A ``dict`` subclass that removes orphan tracks when keys are deleted.
-
-    Every mutating operation that *removes* a key triggers
-    ``_cleanup_orphan_tracks()`` on the owning widget, passing the exact set
-    of removed keys so only the matching tracks are cleaned up.
-    """
-
-    __slots__ = ("_widget",)
-
-    def __init__(self, data: dict, widget: Any) -> None:
-        super().__init__(data)
-        self._widget = widget
-
-    def __delitem__(self, key: str) -> None:
-        super().__delitem__(key)
-        self._widget._cleanup_orphan_tracks({key})
-
-    def pop(self, *args: Any) -> Any:  # type: ignore[override]
-        key = args[0]
-        existed = key in self
-        result = super().pop(*args)
-        if existed:
-            self._widget._cleanup_orphan_tracks({key})
-        return result
-
-    def popitem(self) -> tuple[str, Any]:
-        key, val = super().popitem()
-        self._widget._cleanup_orphan_tracks({key})
-        return key, val
-
-    def clear(self) -> None:
-        removed = set(self.keys())
-        super().clear()
-        self._widget._cleanup_orphan_tracks(removed)
-
-
 class AnimationTimelineWidget(QWidget):
-    """Interactive animation timeline widget."""
+    """Interactive animation timeline widget.
+
+    Wraps an :class:`~qt_animation_timeline.models.Animation` and provides
+    a Qt paint/event surface on top of it.  All animation state is accessible
+    and controllable programmatically through ``widget.state``.
+    """
 
     playhead_moved = Signal(int)
     track_added = Signal(object)
@@ -234,61 +147,38 @@ class AnimationTimelineWidget(QWidget):
         self.line_thickness: int = 6
         self.frame_width: float = _DEFAULT_FRAME_WIDTH
         self.track_height: int = 28
-        # Left margin is auto-computed from label widths; 80 is the minimum.
         self._left_margin_min: int = 80
         self.left_margin: int = self._left_margin_min
         # Extra pixel space to the left of frame 0 so the "0" label is never
         # clipped by the label column when scrolled to the origin.
         self.left_timeline_pad: int = 20
         self.top_margin: int = 40
-        # Allow near-infinite zoom out; zoom_step() adapts via magnitude.
         self.min_frame_width: float = 0.05
         self.max_frame_width: float = 80.0
 
-        # Colours cycled through when adding new tracks.  Replace to customise.
         self.track_color_cycle: list[QColor] = (
             list(track_color_cycle) if track_color_cycle is not None else list(_DEFAULT_TRACK_COLORS)
         )
-
-        # Easing options shown in the right-click menu.  Replace to restrict choices.
         self.easing_options: list[EasingFunction] = list(EasingFunction)
 
-        self.tracks: list[Track] = []
-
-        # Maps real track names to (model_instance, field_name) bindings.
-        # When the playhead moves the field is set to the interpolated value.
-        # When a keyframe is created the current field value is used as its value.
-        # The "..." placeholder track is always available and needs no binding.
-        # Example: ``{"x": (my_object, "x"), "y": (my_object, "y")}``
-        self._track_options: _TrackOptionsDict = _TrackOptionsDict(
-            track_options if track_options is not None else {}, self
+        self.state = Animation(
+            playback_speed=playback_speed,
+            track_options=track_options if track_options is not None else {},
         )
 
-        self.current_frame: int = 0
+        self.selected_keyframes: list[Keyframe] = []
+        self._drag_pivot: Keyframe | None = None
+        self._drag_offset: int = 0
+        self._dragging_keyframes: bool = False
+        self._scrubbing: bool = False
+        self._box_start: QPoint | None = None
+        self._box_rect: QRect | None = None
 
         self.scroll_x: int = 0
         self.scroll_y: int = 0
 
-        self.selected_keyframes: list[Keyframe] = []
-        # Anchor keyframe used to compute deltas during a multi-keyframe drag.
-        self._drag_pivot: Keyframe | None = None
-        self._drag_offset: int = 0
-        self._dragging_keyframes: bool = False
-
-        self._scrubbing: bool = False
-
-        # Rubber-band box-selection state (activated by Shift+left-click).
-        self._box_start: QPoint | None = None
-        self._box_rect: QRect | None = None
-
-        # Playback state.
-        self._playing: bool = False
-        self._play_fps: int = 30
-        self.playback_speed: float = playback_speed
-        self._play_mode: int = _PLAY_NORMAL
-        self._play_direction: int = 1
         self._play_timer = QTimer(self)
-        self._play_timer.timeout.connect(self._advance_playhead)
+        self._play_timer.timeout.connect(self._on_timer_tick)
 
         self.h_scroll = QScrollBar(Qt.Orientation.Horizontal, self)
         self.v_scroll = QScrollBar(Qt.Orientation.Vertical, self)
@@ -298,45 +188,124 @@ class AnimationTimelineWidget(QWidget):
         self.font_size: int = font_size
         self.label_font = QFont("Arial", font_size)
 
+        # Connect Animation evented-model signals to widget updates.
+        # Scalar fields use .events.<name>; structural events use ClassVar signals.
+        self.state.events.current_frame.connect(self._on_state_frame_changed)
+        self.state.events.playing.connect(self._on_state_playing_changed)
+        self.state.track_added.connect(self._on_state_track_added)
+        self.state.track_removed.connect(self._on_state_track_removed)
+        self.state.track_changed.connect(self._on_state_track_changed)
+        self.state.keyframe_added.connect(self._on_state_keyframe_added)
+        self.state.keyframes_removed.connect(self._on_state_keyframes_removed)
+        self.state.keyframes_moved.connect(self._on_state_keyframes_moved)
+        self.state.easing_changed.connect(self._on_state_easing_changed)
+
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        # Enable hover events for keyframe value tooltips.
         self.setMouseTracking(True)
 
-    # ------------------------------------------------------------------ #
-    # track_options property                                               #
-    # ------------------------------------------------------------------ #
+    # ------------------------------------------------------------------
+    # State signal handlers — keep widget and Qt signals in sync
+
+    def _on_state_frame_changed(self, frame: int) -> None:
+        self.update()
+        self.playhead_moved.emit(frame)
+
+    def _on_state_track_added(self, track: Track) -> None:
+        self.updateGeometry()
+        self.update_scrollbars()
+        self.update()
+        self.track_added.emit(track)
+
+    def _on_state_track_removed(self, track: Track) -> None:
+        removed_kfs = set(track.keyframes)
+        self.selected_keyframes = [kf for kf in self.selected_keyframes if kf not in removed_kfs]
+        self.updateGeometry()
+        self.update_scrollbars()
+        self.update()
+        self.track_removed.emit(track)
+
+    def _on_state_track_changed(self, track: Track) -> None:
+        self.update()
+        self.track_changed.emit(track)
+
+    def _on_state_keyframe_added(self, track: Track, kf: Keyframe) -> None:
+        self.updateGeometry()
+        self.update_scrollbars()
+        self.update()
+        self.keyframe_added.emit(track, kf)
+
+    def _on_state_keyframes_removed(self, keyframes: list[Keyframe]) -> None:
+        self.updateGeometry()
+        self.update_scrollbars()
+        self.update()
+        self.keyframes_removed.emit(keyframes)
+
+    def _on_state_keyframes_moved(self, keyframes: list[Keyframe]) -> None:
+        self.updateGeometry()
+        self.update_scrollbars()
+        self.update()
+        self.keyframes_moved.emit(keyframes)
+
+    def _on_state_easing_changed(self, keyframes: list[Keyframe]) -> None:
+        self.update()
+        self.easing_changed.emit(keyframes)
+
+    def _on_state_playing_changed(self, playing: bool) -> None:
+        if playing:
+            interval = max(1, int(1000 / (self.state.play_fps * self.state.playback_speed)))
+            self._play_timer.start(interval)
+        else:
+            self._play_timer.stop()
+        self.update()
+
+    def _on_timer_tick(self) -> None:
+        self.state.advance_playhead()
+
+    # ------------------------------------------------------------------
+    # Forwarding properties for convenient access to state
 
     @property
-    def track_options(self) -> _TrackOptionsDict:
-        """Mapping of track name → (model, field) bindings.
+    def tracks(self) -> list[Track]:
+        return self.state.tracks
 
-        Assigning a new dict replaces the options and immediately removes any
-        tracks whose names are no longer present (except the placeholder).
-        In-place deletions (``del``, ``pop``, ``clear``, ``popitem``) trigger
-        the same cleanup automatically.
-        """
-        return self._track_options
+    @property
+    def current_frame(self) -> int:
+        return self.state.current_frame
+
+    @property
+    def track_options(self) -> dict[str, tuple[Any, str]]:
+        return self.state.track_options
 
     @track_options.setter
     def track_options(self, value: dict[str, tuple[Any, str]]) -> None:
-        removed_keys = set(self._track_options) - set(value)
-        self._track_options = _TrackOptionsDict(value, self)
-        self._cleanup_orphan_tracks(removed_keys)
+        self.state.track_options = value
 
-    # ------------------------------------------------------------------ #
-    # Size hints                                                           #
-    # ------------------------------------------------------------------ #
+    @property
+    def playback_speed(self) -> float:
+        return self.state.playback_speed
+
+    @playback_speed.setter
+    def playback_speed(self, value: float) -> None:
+        self.state.playback_speed = value
+
+    # ------------------------------------------------------------------
+    # Size hints
 
     def sizeHint(self) -> QSize:
-        """Return a default size fitting ≥ 4 tracks and ≥ 50 visible frames."""
-        w = int(self._left_margin_min + self.left_timeline_pad + 50 * _DEFAULT_FRAME_WIDTH)
-        h = self.top_margin + 4 * self.track_height + 20  # +20 for h-scrollbar
+        """Return a size fitting current tracks and visible keyframe range."""
+        n = max(4, len(self.state.tracks))
+        max_frame = max(
+            (kf.t for t in self.state.tracks for kf in t.keyframes), default=50
+        )
+        w = int(self._left_margin_min + self.left_timeline_pad + (max_frame + 20) * _DEFAULT_FRAME_WIDTH)
+        h = self.top_margin + n * self.track_height + 20
         return QSize(w, h)
 
     def minimumSizeHint(self) -> QSize:
         """Return the minimum useful size: 2 tracks high and 10 frames wide."""
+        n = max(2, len(self.state.tracks))
         w = int(self._left_margin_min + self.left_timeline_pad + 10 * _DEFAULT_FRAME_WIDTH)
-        h = self.top_margin + 2 * self.track_height + 20
+        h = self.top_margin + n * self.track_height + 20
         return QSize(w, h)
 
     def frame_to_x(self, frame: int | float) -> float:
@@ -364,26 +333,33 @@ class AnimationTimelineWidget(QWidget):
             + self.track_height / 2
         )
 
-    # ------------------------------------------------------------------ #
-    # Scrollbars / resize                                                  #
-    # ------------------------------------------------------------------ #
+    # ------------------------------------------------------------------
+    # Scrollbars / resize
 
     def resizeEvent(self, event) -> None:
         vsw = 20 if self.v_scroll.isVisible() else 0
+        hsw = 20 if self.h_scroll.isVisible() else 0
         self.h_scroll.setGeometry(0, self.height() - 20, self.width() - vsw, 20)
-        self.v_scroll.setGeometry(self.width() - 20, 0, 20, self.height() - 20)
+        self.v_scroll.setGeometry(self.width() - 20, 0, 20, self.height() - hsw)
         self.update_scrollbars()
+
 
     def update_scrollbars(self) -> None:
         """Recalculate scrollbar ranges based on content size."""
         self._update_left_margin()
-        max_frame = max((kf.t for t in self.tracks for kf in t.keyframes), default=0)
+        max_frame = max((kf.t for t in self.state.tracks for kf in t.keyframes), default=0)
         content_width = self.left_timeline_pad + (max_frame + 20) * self.frame_width
         page_w = self.width() - self.left_margin
-        self.h_scroll.setMaximum(max(0, int(content_width - page_w)))
-        self.h_scroll.setPageStep(int(page_w))
+        need_hscroll = content_width > page_w
+        self.h_scroll.setVisible(need_hscroll)
+        if need_hscroll:
+            self.h_scroll.setMaximum(int(content_width - page_w))
+            self.h_scroll.setPageStep(int(page_w))
+        else:
+            self.scroll_x = 0
+            self.h_scroll.setMaximum(0)
 
-        total_tracks_height = len(self.tracks) * self.track_height
+        total_tracks_height = len(self.state.tracks) * self.track_height
         page_h = self.height() - self.top_margin
         need_vscroll = total_tracks_height > page_h
         self.v_scroll.setVisible(need_vscroll)
@@ -403,47 +379,21 @@ class AnimationTimelineWidget(QWidget):
         self.update()
 
     def _update_left_margin(self) -> None:
-        """Recompute ``left_margin`` to fit the widest track label."""
-        if not self.tracks:
+        if not self.state.tracks:
             self.left_margin = self._left_margin_min
             return
         metrics = QFontMetrics(self.label_font)
-        # Labels are drawn starting at x=40; add 10 px right padding.
-        max_text_w = max(metrics.horizontalAdvance(t.name) for t in self.tracks)
+        max_text_w = max(metrics.horizontalAdvance(t.name) for t in self.state.tracks)
         self.left_margin = max(self._left_margin_min, 40 + max_text_w + 10)
-
-    def _cleanup_orphan_tracks(self, removed_keys: set[str]) -> None:
-        """Remove tracks whose names appear in *removed_keys*.
-
-        The placeholder track (``"..."``) is always kept regardless.
-        Clears any selected keyframes that belonged to the removed tracks.
-        """
-        targets = removed_keys - {_PLACEHOLDER_TRACK}
-        if not targets:
-            return
-        removed = [t for t in self.tracks if t.name in targets]
-        if not removed:
-            return
-        removed_kfs = {kf for t in removed for kf in t.keyframes}
-        self.tracks = [t for t in self.tracks if t.name not in targets]
-        self.selected_keyframes = [
-            kf for kf in self.selected_keyframes if kf not in removed_kfs
-        ]
-        self.update_scrollbars()
-        self.update()
-        for t in removed:
-            self.track_removed.emit(t)
 
     def zoom_step(self) -> int:
         """Return the frame-label interval appropriate for the current zoom level.
 
         Uses order-of-magnitude arithmetic so the step adapts gracefully at
-        any zoom level, including very zoomed-out views where frame_width is a
-        fraction of a pixel.
+        any zoom level, including very zoomed-out views.
         """
         if self.frame_width <= 0:
             return 1000
-        # How many frames fit in ~100 px at the current zoom?
         frames_per_100px = 100.0 / self.frame_width
         if frames_per_100px <= 1.0:
             return 1
@@ -457,6 +407,9 @@ class AnimationTimelineWidget(QWidget):
             step = magnitude
         return max(1, int(step))
 
+    # ------------------------------------------------------------------
+    # Painting
+
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.fillRect(self.rect(), self.bg_color)
@@ -466,7 +419,6 @@ class AnimationTimelineWidget(QWidget):
         self._draw_track_backgrounds(painter)
         self._draw_grid(painter, metrics)
 
-        # Clip track content to the right of the label column.
         painter.save()
         painter.setClipRect(
             self.left_margin,
@@ -474,7 +426,7 @@ class AnimationTimelineWidget(QWidget):
             self.width() - self.left_margin,
             self.height() - self.top_margin,
         )
-        for i, track in enumerate(self.tracks):
+        for i, track in enumerate(self.state.tracks):
             self.draw_track(painter, i, track)
         if self._box_rect is not None:
             self._draw_rubber_band(painter)
@@ -484,13 +436,11 @@ class AnimationTimelineWidget(QWidget):
         self._draw_add_button(painter)
         self._draw_control_buttons(painter)
 
-        # Playhead — only when to the right of the label column.
-        x = self.frame_to_x(self.current_frame)
+        x = self.frame_to_x(self.state.current_frame)
         if x >= self.left_margin:
             xi = int(x)
             painter.setPen(QPen(self.current_frame_color, 2))
             painter.drawLine(xi, 0, xi, self.height())
-            # Downward-pointing triangle at the very top of the playhead.
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(self.current_frame_color)
             s = 7
@@ -498,13 +448,11 @@ class AnimationTimelineWidget(QWidget):
             painter.drawPolygon(pts)
 
     def _draw_track_backgrounds(self, painter: QPainter) -> None:
-        for i in range(len(self.tracks)):
+        for i in range(len(self.state.tracks)):
             y = self.top_margin + i * self.track_height - self.scroll_y
             painter.fillRect(
-                self.left_margin,
-                y,
-                self.width() - self.left_margin,
-                self.track_height,
+                self.left_margin, y,
+                self.width() - self.left_margin, self.track_height,
                 self.track_bg_color,
             )
 
@@ -538,18 +486,16 @@ class AnimationTimelineWidget(QWidget):
 
     def _draw_labels(self, painter: QPainter, metrics: QFontMetrics) -> None:
         btn_size = 14
-        for i, track in enumerate(self.tracks):
+        for i, track in enumerate(self.state.tracks):
             y = self.top_margin + i * self.track_height - self.scroll_y
             if y < -self.track_height or y > self.height():
                 continue
-
-            painter.setPen(track.color)
+            painter.setPen(QColor(*track.color))
             painter.drawText(
                 40,
                 y + self.track_height // 2 + metrics.ascent() // 2,
                 track.name,
             )
-
             bx = 8
             by = y + (self.track_height - btn_size) // 2
             painter.setBrush(self.remove_button_color)
@@ -562,39 +508,38 @@ class AnimationTimelineWidget(QWidget):
     def _draw_add_button(self, painter: QPainter) -> None:
         """Draw the add-track (+) button below all track labels.
 
-        The button is greyed out when no further track options are available.
+        Greyed out when no further track options are available.
+        The button is drawn in the same width and column layout as the
+        control buttons above so the edges line up exactly.
         """
-        ay = self.top_margin + len(self.tracks) * self.track_height - self.scroll_y
-        can_add = self._can_add_track()
+        btn_w = self.left_margin // 3
+        ay = self.top_margin + len(self.state.tracks) * self.track_height - self.scroll_y
+        can_add = self.state._can_add_track()
         color = self.add_button_color if can_add else QColor(60, 60, 60)
         painter.setBrush(color)
         painter.setPen(Qt.PenStyle.NoPen)
+        # Fill the full label column so the background matches the control buttons.
         painter.drawRect(0, ay, self.left_margin, self.track_height)
+        # Draw the + icon in the same slot as the play button (rightmost third).
         icon_color = QColor(0, 0, 0) if can_add else QColor(100, 100, 100)
-        _render_svg_icon(
-            painter, QRect(0, ay, self.left_margin, self.track_height), "plus", icon_color
-        )
+        icon_rect = QRect(2 * btn_w, ay, self.left_margin - 2 * btn_w, self.track_height)
+        _render_svg_icon(painter, icon_rect, "plus", icon_color)
 
     def _draw_control_buttons(self, painter: QPainter) -> None:
-        """Draw the home, play-mode, and play/pause buttons in the top-left corner."""
         btn_w = self.left_margin // 3
+        # Last button extends to left_margin exactly to avoid a rounding gap.
+        btn_w3 = self.left_margin - 2 * btn_w
         h = self.top_margin
-        btn_rect = QRect(0, 0, btn_w, h)
 
-        # Home / reset-view button (left third).
-        painter.fillRect(btn_rect, self.control_btn_color)
-        _render_svg_icon(painter, btn_rect, "home", self.control_btn_text_color)
+        painter.fillRect(QRect(0, 0, btn_w, h), self.control_btn_color)
+        _render_svg_icon(painter, QRect(0, 0, btn_w, h), "home", self.control_btn_text_color)
 
-        # Play-mode toggle button (middle third) — distinct color from neighbours.
-        btn_rect.moveLeft(btn_w)
-        painter.fillRect(btn_rect, self.loop_btn_color)
-        _render_svg_icon(painter, btn_rect, _PLAY_MODE_ICONS[self._play_mode], self.loop_btn_text_color)
+        painter.fillRect(QRect(btn_w, 0, btn_w, h), self.loop_btn_color)
+        _render_svg_icon(painter, QRect(btn_w, 0, btn_w, h), _PLAY_MODE_ICONS[self.state.play_mode], self.loop_btn_text_color)
 
-        # Play / pause button (right third).
-        btn_rect.moveLeft(2 * btn_w)
-        painter.fillRect(btn_rect, self.play_btn_color)
-        play_icon = "pause" if self._playing else "play"
-        _render_svg_icon(painter, btn_rect, play_icon, self.play_btn_text_color)
+        play_icon = "pause" if self.state.playing else "play"
+        painter.fillRect(QRect(2 * btn_w, 0, btn_w3, h), self.play_btn_color)
+        _render_svg_icon(painter, QRect(2 * btn_w, 0, btn_w3, h), play_icon, self.play_btn_text_color)
 
     def _draw_rubber_band(self, painter: QPainter) -> None:
         assert self._box_rect is not None
@@ -605,15 +550,14 @@ class AnimationTimelineWidget(QWidget):
     def draw_track(self, painter: QPainter, index: int, track: Track) -> None:
         """Draw the connecting line and all keyframes for *track*."""
         cy = int(self.track_center_y(index))
+        track_color = QColor(*track.color)
 
         if len(track.keyframes) >= 2:
-            painter.setPen(QPen(track.color, self.line_thickness))
+            painter.setPen(QPen(track_color, self.line_thickness))
             for k1, k2 in itertools.pairwise(track.keyframes):
                 painter.drawLine(
-                    int(self.frame_to_x(k1.t)),
-                    cy,
-                    int(self.frame_to_x(k2.t)),
-                    cy,
+                    int(self.frame_to_x(k1.t)), cy,
+                    int(self.frame_to_x(k2.t)), cy,
                 )
 
         for kf in track.keyframes:
@@ -626,7 +570,7 @@ class AnimationTimelineWidget(QWidget):
         x = self.frame_to_x(kf.t)
         y = self.track_center_y(track_index)
         selected = kf in self.selected_keyframes
-        painter.setBrush(track.color)
+        painter.setBrush(QColor(*track.color))
         if selected:
             painter.setPen(QPen(self.keyframe_selected_border_color, 2))
         else:
@@ -640,13 +584,15 @@ class AnimationTimelineWidget(QWidget):
         ]
         painter.drawPolygon(pts)
 
+    # ------------------------------------------------------------------
+    # Mouse events
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
             return
 
         x, y = event.x(), event.y()
 
-        # Top strip (ruler + control buttons).
         if y < self.top_margin:
             if x < self.left_margin:
                 self._handle_control_click(x, y)
@@ -655,18 +601,15 @@ class AnimationTimelineWidget(QWidget):
                 self._set_playhead(max(0, self.x_to_frame(x)))
             return
 
-        # Label column: remove button and add button.
         if x < self.left_margin:
-            self._handle_label_click(x, y)
+            self._handle_label_click(x, y, event.globalPos())
             return
 
-        # Timeline content — keyframes take priority.
         kf = self.pos_to_keyframe(x, y)
         if kf is not None:
             self._start_keyframe_drag(event, kf, x)
             return
 
-        # Empty content area: Shift+click starts rubber-band selection.
         if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
             self.selected_keyframes.clear()
             self._box_start = QPoint(x, y)
@@ -676,32 +619,28 @@ class AnimationTimelineWidget(QWidget):
         self.update()
 
     def _handle_control_click(self, x: int, _y: int) -> None:
-        """Handle a click in the top-left control area (home / play-mode / play)."""
         btn_w = self.left_margin // 3
         if x < btn_w:
             self._reset_view()
         elif x < 2 * btn_w:
-            self._cycle_play_mode()
+            self.state.cycle_play_mode()
         else:
             self._toggle_playback()
 
-    def _handle_label_click(self, x: int, y: int) -> None:
-        """Handle a left-click inside the label column (remove/add buttons)."""
-        for i in range(len(self.tracks)):
+    def _handle_label_click(self, x: int, y: int, global_pos: object) -> None:
+        """Handle a left-click inside the label column (remove / add buttons)."""
+        for i in range(len(self.state.tracks)):
             ty = self.top_margin + i * self.track_height - self.scroll_y
             if 8 <= x <= 22 and ty + 13 <= y <= ty + 27:
-                removed = self.tracks.pop(i)
-                self.update_scrollbars()
-                self.update()
-                self.track_removed.emit(removed)
+                track = self.state.tracks[i]
+                self.state.remove_track(track)
                 return
 
-        ay = self.top_margin + len(self.tracks) * self.track_height - self.scroll_y
-        if ay <= y <= ay + self.track_height and self._can_add_track():
-            self.add_track()
+        ay = self.top_margin + len(self.state.tracks) * self.track_height - self.scroll_y
+        if ay <= y <= ay + self.track_height and self.state._can_add_track():
+            self._show_add_track_popup(global_pos)
 
     def _start_keyframe_drag(self, event: QMouseEvent, kf: Keyframe, x: int) -> None:
-        """Set up drag state for the clicked keyframe."""
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if kf in self.selected_keyframes:
                 self.selected_keyframes.remove(kf)
@@ -731,7 +670,6 @@ class AnimationTimelineWidget(QWidget):
             self._update_box_select(QPoint(x, y))
             return
 
-        # Hover tooltip: show keyframe value when mousing over a diamond.
         if x >= self.left_margin and y >= self.top_margin:
             kf = self.pos_to_keyframe(x, y)
             if kf is not None:
@@ -751,7 +689,7 @@ class AnimationTimelineWidget(QWidget):
             return
         for kf in self.selected_keyframes:
             kf.t = max(0, kf.t + delta)
-        for track in self.tracks:
+        for track in self.state.tracks:
             track.keyframes.sort(key=lambda k: k.t)
         self.update_scrollbars()
         self.update()
@@ -765,7 +703,7 @@ class AnimationTimelineWidget(QWidget):
     def _keyframes_in_rect(self, rect: QRect) -> list[Keyframe]:
         """Return all keyframes whose centre point lies within *rect*."""
         result = []
-        for i, track in enumerate(self.tracks):
+        for i, track in enumerate(self.state.tracks):
             cy = int(self.track_center_y(i))
             for kf in track.keyframes:
                 cx = int(self.frame_to_x(kf.t))
@@ -775,9 +713,7 @@ class AnimationTimelineWidget(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if self._dragging_keyframes and self.selected_keyframes:
-            self.keyframes_moved.emit(list(self.selected_keyframes))
-            # Playhead might be inside a moved segment — update the model.
-            self._dispatch_track_callbacks(self.current_frame)
+            self.state.notify_keyframes_moved(list(self.selected_keyframes))
 
         self._scrubbing = False
         self._drag_pivot = None
@@ -787,54 +723,40 @@ class AnimationTimelineWidget(QWidget):
         self.update()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        # Only left double-click is handled; ignore right-click.
         if event.button() != Qt.MouseButton.LeftButton:
             return
 
         x, y = event.x(), event.y()
 
-        # Double-click on the top-left control area counts as a second click
-        # (e.g. double-clicking the play button toggles playback again).
+        # Double-click on the control area counts as a second click.
         if y < self.top_margin and x < self.left_margin:
             self._handle_control_click(x, y)
             return
 
-        # Ignore double-clicks in the ruler strip or label column.
         if x < self.left_margin or y < self.top_margin:
             return
 
         track_index = self.y_to_track_index(y)
-        if not (0 <= track_index < len(self.tracks)):
+        if not (0 <= track_index < len(self.state.tracks)):
             return
 
         frame = max(0, self.x_to_frame(x))
-        track = self.tracks[track_index]
+        track = self.state.tracks[track_index]
 
-        # Capture the current field value from the model binding, if available.
-        binding = self.track_options.get(track.name)
-        if binding is not None:
-            model, field = binding
-            initial_value = getattr(model, field)
-        else:
-            initial_value = 0
+        binding = self.state.track_options.get(track.name)
+        initial_value = getattr(binding[0], binding[1]) if binding is not None else 0
 
         try:
-            kf = track.add_keyframe(frame, value=initial_value)
+            self.state.add_keyframe(track, frame, value=initial_value)
         except KeyError:
             return
-
-        self.update_scrollbars()
-        self.update()
-        self.keyframe_added.emit(track, kf)
-        # The new keyframe may affect the current playhead position.
-        self._dispatch_track_callbacks(self.current_frame)
 
     def pos_to_keyframe(self, x: float, y: float) -> Keyframe | None:
         """Return the keyframe at screen position *(x, y)*, or ``None``."""
         track_index = self.y_to_track_index(y)
-        if not (0 <= track_index < len(self.tracks)):
+        if not (0 <= track_index < len(self.state.tracks)):
             return None
-        track = self.tracks[track_index]
+        track = self.state.tracks[track_index]
         cy = self.track_center_y(track_index)
         for kf in track.keyframes:
             kx = self.frame_to_x(kf.t)
@@ -844,7 +766,6 @@ class AnimationTimelineWidget(QWidget):
 
     def contextMenuEvent(self, event) -> None:
         x, y = event.pos().x(), event.pos().y()
-        # Ignore right-clicks in the ruler/control strip.
         if y < self.top_margin:
             return
         if x >= self.left_margin:
@@ -855,14 +776,13 @@ class AnimationTimelineWidget(QWidget):
     def _segment_left_keyframe_at(self, x: int, y: int) -> Keyframe | None:
         """Return the left keyframe of the segment under *(x, y)*, or ``None``.
 
-        Searches from left to right; returns the keyframe that starts the
-        segment (or the last keyframe when clicking after all keyframes).
-        Returns ``None`` when the track has no keyframes.
+        Returns the keyframe that starts the segment, or the last keyframe when
+        clicking past all keyframes.  Returns ``None`` when the track is empty.
         """
         track_index = self.y_to_track_index(y)
-        if not (0 <= track_index < len(self.tracks)):
+        if not (0 <= track_index < len(self.state.tracks)):
             return None
-        track = self.tracks[track_index]
+        track = self.state.tracks[track_index]
         kfs = track.keyframes
         if not kfs:
             return None
@@ -878,31 +798,25 @@ class AnimationTimelineWidget(QWidget):
         """Return the subset of ``easing_options`` appropriate for *track*'s type.
 
         For ``bool`` fields only ``Step`` is offered since linear interpolation
-        of 0/1 produces non-boolean intermediates.  All other types get the
-        full ``easing_options`` list.
+        of 0/1 produces non-boolean intermediates.
         """
-        binding = self.track_options.get(track.name)
-        if binding is None or track.name == _PLACEHOLDER_TRACK:
+        binding = self.state.track_options.get(track.name)
+        if binding is None:
             return self.easing_options
         model, field = binding
         try:
             value = getattr(model, field)
         except AttributeError:
             return self.easing_options
-        # isinstance(True, bool) must come before isinstance(True, int).
         if isinstance(value, bool):
             return [ef for ef in self.easing_options if ef is EasingFunction.Step]
         return self.easing_options
 
     def _is_on_track_line(self, x: int, y: int) -> bool:
-        """Return ``True`` if *(x, y)* is vertically close to a track centre line.
-
-        Only pixels within ``line_thickness + 4`` of the track's horizontal
-        connecting line qualify.  This is used to restrict the right-click
-        easing menu to actual track content rather than empty row space.
-        """
+        """Return ``True`` if *(x, y)* is within ``line_thickness + 4`` pixels
+        of a track's horizontal centre line."""
         track_index = self.y_to_track_index(y)
-        if not (0 <= track_index < len(self.tracks)):
+        if not (0 <= track_index < len(self.state.tracks)):
             return False
         cy = self.track_center_y(track_index)
         return abs(y - cy) <= self.line_thickness + 4
@@ -910,23 +824,20 @@ class AnimationTimelineWidget(QWidget):
     def _show_easing_menu(self, x: int, y: int, global_pos: object) -> None:
         """Show easing options for the segment under the cursor.
 
-        Only opens when the click lands directly on a keyframe diamond or
-        within ``line_thickness + 4`` pixels of a track's centre line.
-        Clicking in empty space between tracks does nothing.
+        Only opens when the click lands on a keyframe diamond or within
+        ``line_thickness + 4`` pixels of a track's centre line.
         """
         kf = self.pos_to_keyframe(x, y)
         if kf is None:
-            # Only fall back to segment lookup when on the actual track line.
             if not self._is_on_track_line(x, y):
                 return
             kf = self._segment_left_keyframe_at(x, y)
         if kf is None:
             return
 
-        # Determine allowed easings based on the field type of this track.
         track_index = self.y_to_track_index(y)
         track = (
-            self.tracks[track_index] if 0 <= track_index < len(self.tracks) else None
+            self.state.tracks[track_index] if 0 <= track_index < len(self.state.tracks) else None
         )
         allowed = (
             self._get_allowed_easings_for_track(track)
@@ -945,10 +856,7 @@ class AnimationTimelineWidget(QWidget):
             def _set(checked: bool, _ef: EasingFunction = ef) -> None:
                 for k in targets:
                     k.easing = _ef
-                self.update()
-                self.easing_changed.emit(list(targets))
-                # Playhead may be in an affected segment — update the model.
-                self._dispatch_track_callbacks(self.current_frame)
+                self.state.notify_easing_changed(list(targets))
 
             action.triggered.connect(_set)
 
@@ -957,34 +865,28 @@ class AnimationTimelineWidget(QWidget):
     def _get_track_change_options(self, track: Track) -> list[tuple[str, bool]]:
         """Return ``(option_name, is_enabled)`` pairs for the track-change picker.
 
-        The ``...`` placeholder is always enabled.  Named options already used
-        by *other* tracks are disabled to enforce uniqueness.
+        Options already used by *other* tracks are disabled to enforce uniqueness.
         """
         used_by_others = {
-            t.name
-            for t in self.tracks
-            if t is not track and t.name != _PLACEHOLDER_TRACK
+            t.name for t in self.state.tracks if t is not track
         }
         return [
-            (opt, opt == _PLACEHOLDER_TRACK or opt not in used_by_others)
-            for opt in [_PLACEHOLDER_TRACK, *self.track_options]
+            (opt, opt not in used_by_others)
+            for opt in self.state.track_options
         ]
 
     def _show_track_change_menu(self, y: int, global_pos: object) -> None:
-        """Show a searchable combo-box for changing a track to one of the configured options.
+        """Show a searchable combo-box for changing a track's binding.
 
-        The ``...`` placeholder is always available.  Named options that are
-        already used by *other* tracks are shown but disabled to enforce
-        uniqueness.
+        Options already used by other tracks are disabled to enforce uniqueness.
         """
         track_index = self.y_to_track_index(y)
-        if not (0 <= track_index < len(self.tracks)):
+        if not (0 <= track_index < len(self.state.tracks)):
             return
 
-        track = self.tracks[track_index]
+        track = self.state.tracks[track_index]
         options = self._get_track_change_options(track)
 
-        # Float a frameless popup containing a searchable combo-box.
         container = QWidget(None, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         container.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         layout = QVBoxLayout(container)
@@ -1015,20 +917,56 @@ class AnimationTimelineWidget(QWidget):
             model_item = combo.model().item(idx)
             if model_item is not None and not model_item.isEnabled():
                 return
-            track.name = combo.itemText(idx)
-            self.update()
-            self.track_changed.emit(track)
+            self.state.rename_track(track, combo.itemText(idx))
             container.close()
 
         combo.activated.connect(_apply)
 
-    def _scroll_x_for_zoom(self, mouse_x: int, old_fw: float, new_fw: float) -> int:
-        """Compute the ``scroll_x`` that keeps the frame under *mouse_x* fixed.
+    def _show_add_track_popup(self, global_pos: object) -> None:
+        """Show a searchable combo-box to pick which track to add.
 
-        Solves for *new_scroll_x* such that the exact frame position under the
-        mouse cursor maps to the same screen x coordinate after a zoom change
-        from *old_fw* to *new_fw* pixels-per-frame.
+        Only available (unused) track options are shown.  The user can either
+        click an item or type a search term and press Enter to add the first
+        matching (highlighted) item.
         """
+        available = self.state.available_track_options()
+        if not available:
+            return
+
+        container = QWidget(None, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        container.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(0)
+
+        combo = QSearchableComboBox(container)
+        for name in available:
+            combo.addItem(name)
+
+        layout.addWidget(combo)
+        container.adjustSize()
+        if global_pos is not None:
+            container.move(global_pos)
+        container.show()
+
+        def _add(idx: int) -> None:
+            name = combo.itemText(idx)
+            if name:
+                self.add_track(name)
+            container.close()
+
+        def _add_from_enter() -> None:
+            _add(combo.currentIndex())
+
+        combo.activated.connect(_add)
+        if combo.lineEdit() is not None:
+            combo.lineEdit().returnPressed.connect(_add_from_enter)
+
+    # ------------------------------------------------------------------
+    # Zoom / scroll
+
+    def _scroll_x_for_zoom(self, mouse_x: int, old_fw: float, new_fw: float) -> int:
+        """Compute the ``scroll_x`` that keeps the frame under *mouse_x* fixed."""
         frame_at_mouse = (
             mouse_x - self.left_margin - self.left_timeline_pad + self.scroll_x
         ) / old_fw
@@ -1068,85 +1006,37 @@ class AnimationTimelineWidget(QWidget):
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Delete:
             removed = list(self.selected_keyframes)
-            for track in self.tracks:
-                track.keyframes = [
-                    kf for kf in track.keyframes if kf not in self.selected_keyframes
-                ]
+            self.state.remove_keyframes(removed)
             self.selected_keyframes.clear()
-            self.update_scrollbars()
-            self.update()
-            if removed:
-                self.keyframes_removed.emit(removed)
-                # Deleting a keyframe may change the interpolated value at the
-                # current playhead position — keep the model in sync.
-                self._dispatch_track_callbacks(self.current_frame)
         elif event.key() == Qt.Key.Key_Space:
             self._toggle_playback()
         elif event.key() == Qt.Key.Key_Left:
-            self._set_playhead(max(0, self.current_frame - 1))
+            self._set_playhead(max(0, self.state.current_frame - 1))
         elif event.key() == Qt.Key.Key_Right:
-            self._set_playhead(self.current_frame + 1)
+            self._set_playhead(self.state.current_frame + 1)
+
+    # ------------------------------------------------------------------
+    # Playback
 
     def _toggle_playback(self) -> None:
-        """Start or stop playback."""
-        if self._playing:
-            self._stop_playback()
-        else:
-            self._start_playback()
+        self.state.playing = not self.state.playing
 
     def _start_playback(self) -> None:
-        self._playing = True
-        interval = max(1, int(1000 / (self._play_fps * self.playback_speed)))
-        self._play_timer.start(interval)
-        self.update()
+        self.state.playing = True
 
     def _stop_playback(self) -> None:
-        self._playing = False
-        self._play_timer.stop()
-        self.update()
-
-    def _cycle_play_mode(self) -> None:
-        """Cycle through normal → loop → pingpong → normal play modes."""
-        self._play_mode = (self._play_mode + 1) % 3
-        self._play_direction = 1
-        self.update()
-
-    def _advance_playhead(self) -> None:
-        """Advance by one frame according to the current play mode.
-
-        Normal: stop at the last keyframe.
-        Loop: wrap back to frame 0 after the last keyframe.
-        Pingpong: reverse direction at each end.
-        """
-        max_frame = max((kf.t for t in self.tracks for kf in t.keyframes), default=0)
-        next_frame = self.current_frame + self._play_direction
-        if self._play_mode == _PLAY_NORMAL:
-            if next_frame > max_frame:
-                self._stop_playback()
-                self._set_playhead(max_frame)
-                return
-        elif self._play_mode == _PLAY_LOOP:
-            if next_frame > max_frame:
-                next_frame = 0
-        elif self._play_mode == _PLAY_PINGPONG:
-            if next_frame > max_frame:
-                self._play_direction = -1
-                next_frame = max(0, max_frame - 1)
-            elif next_frame < 0:
-                self._play_direction = 1
-                next_frame = min(1, max_frame)
-        self._set_playhead(next_frame)
+        self.state.playing = False
 
     def _reset_view(self) -> None:
         """Fit the entire keyframe range in the viewport and scroll to the origin.
 
         The zoom level is chosen so that all keyframes from frame 0 to the last
         keyframe (plus a 10 % buffer, minimum 10 frames) fill the available
-        timeline width.  Falls back to the default zoom when there are no
-        keyframes or the widget has no width yet.
+        timeline width.
         """
-        max_frame = max((kf.t for t in self.tracks for kf in t.keyframes), default=0)
-        # When there are no keyframes, buffer alone provides a small visible range.
+        max_frame = max(
+            (kf.t for t in self.state.tracks for kf in t.keyframes), default=0
+        )
         buffer = max(10, max_frame // 10)
         total_frames = max_frame + buffer
         available = self.width() - self.left_margin - self.left_timeline_pad
@@ -1166,92 +1056,26 @@ class AnimationTimelineWidget(QWidget):
         self.update()
 
     def _set_playhead(self, frame: int) -> None:
-        """Move the playhead to *frame*, dispatch callbacks, emit ``playhead_moved``."""
-        if frame != self.current_frame:
-            self.current_frame = frame
-            self.playhead_moved.emit(frame)
-            self._dispatch_track_callbacks(frame)
-        self.update()
+        """Move the playhead to *frame*."""
+        self.state.current_frame = frame
 
-    def _dispatch_track_callbacks(self, frame: int) -> None:
-        """Set each bound model field to the interpolated track value at *frame*.
-
-        For pydantic models and dataclasses the value is applied in-place via
-        ``_apply_model_value`` rather than replaced wholesale.
-        """
-        for track in self.tracks:
-            if track.name == _PLACEHOLDER_TRACK:
-                continue
-            binding = self.track_options.get(track.name)
-            if binding is None:
-                continue
-            model, field = binding
-            value = self._interpolate_track(track, frame)
-            if value is None:
-                continue
-            reference = getattr(model, field)
-            if _is_model_instance(reference):
-                if _is_model_instance(value):
-                    _apply_model_value(reference, value)
-                # If value isn't a model (e.g. Step returned raw dict), skip.
-            else:
-                setattr(model, field, _coerce_value(reference, value))
-
-    def _interpolate_track(self, track: Track, frame: int) -> Any | None:
-        """Return the interpolated value of *track* at *frame*, or ``None`` if empty.
-
-        Easing is per-segment: the keyframe at the start of each interval
-        controls the interpolation curve.  Values before the first keyframe
-        and after the last keyframe are held constant.
-
-        ``list`` and ``tuple`` keyframe values are converted to numpy arrays
-        before easing so that arithmetic works correctly; ``_coerce_value``
-        casts the result back to the original container type during dispatch.
-        """
-        kfs = track.keyframes
-        if not kfs:
-            return None
-        if len(kfs) == 1 or frame <= kfs[0].t:
-            return kfs[0].value
-        if frame >= kfs[-1].t:
-            return kfs[-1].value
-        for k1, k2 in itertools.pairwise(kfs):
-            if k1.t <= frame < k2.t:
-                span = k2.t - k1.t
-                if span == 0:
-                    return k2.value
-                p = (frame - k1.t) / span
-                v1, v2 = k1.value, k2.value
-                if isinstance(v1, (list, tuple)) or isinstance(v2, (list, tuple)):
-                    v1 = np.asarray(v1, dtype=float)
-                    v2 = np.asarray(v2, dtype=float)
-                return k1.easing(p, v1, v2)
-        return kfs[-1].value  # unreachable, but keeps type-checker happy
+    # ------------------------------------------------------------------
+    # Track management helpers
 
     def _can_add_track(self) -> bool:
-        """Return ``True`` if there is at least one unused track option.
+        return self.state._can_add_track()
 
-        When ``track_options`` is empty (no bindings configured) there is no
-        constraint and any number of tracks may be added.
-        """
-        if not self.track_options:
-            return True
-        used = {t.name for t in self.tracks if t.name != _PLACEHOLDER_TRACK}
-        return len(used) < len(self.track_options)
+    def add_track(self, name: str, color: tuple[int, int, int] | None = None) -> Track:
+        """Add a new track with an auto-assigned colour and return it."""
+        if color is None:
+            qcolor = self.track_color_cycle[
+                len(self.state.tracks) % len(self.track_color_cycle)
+            ] if self.track_color_cycle else None
+            color = (qcolor.red(), qcolor.green(), qcolor.blue()) if qcolor else (180, 180, 180)
+        return self.state.add_track(name, color)
 
-    def add_track(self, name: str | None = None) -> Track:
-        """Add a new track with an auto-assigned colour and return it.
+    def _interpolate_track(self, track: Track, frame: int) -> Any:
+        return self.state.interpolate_track(track, frame)
 
-        When *name* is ``None`` the track is created as the ``"..."``
-        placeholder, which can later be changed via the context menu.
-        """
-        if self.track_color_cycle:
-            color = self.track_color_cycle[len(self.tracks) % len(self.track_color_cycle)]
-        else:
-            color = QColor(180, 180, 180)
-        track = Track(name if name is not None else _PLACEHOLDER_TRACK, color)
-        self.tracks.append(track)
-        self.update_scrollbars()
-        self.update()
-        self.track_added.emit(track)
-        return track
+    def _dispatch_track_callbacks(self, frame: int) -> None:
+        self.state._dispatch_track_callbacks(frame)

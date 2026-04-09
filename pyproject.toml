@@ -35,7 +35,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 # add your package dependencies here
-dependencies = ["qtpy", "superqt", "numpy"]
+dependencies = ["qtpy", "superqt", "numpy", "psygnal", "pydantic"]
 
 # https://peps.python.org/pep-0621/#dependencies-optional-dependencies
 # add dependencies for "extra" features here.  Not dev dependencies.

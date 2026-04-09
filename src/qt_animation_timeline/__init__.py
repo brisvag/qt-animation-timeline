@@ -10,11 +10,12 @@ __author__ = "Lorenzo Gaifas"
 __email__ = "brisvag@gmail.com"
 
 from qt_animation_timeline.easing import EasingFunction, _coerce_value
-from qt_animation_timeline.editor import _PLACEHOLDER_TRACK, AnimationTimelineWidget
-from qt_animation_timeline.models import Keyframe, Track
+from qt_animation_timeline.editor import AnimationTimelineWidget
+from qt_animation_timeline.models import Animation, AnimationState, Keyframe, Track
 
 __all__ = [
-    "_PLACEHOLDER_TRACK",
+    "Animation",
+    "AnimationState",  # backward-compat alias for Animation
     "AnimationTimelineWidget",
     "EasingFunction",
     "Keyframe",
