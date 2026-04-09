@@ -28,8 +28,7 @@ _MISSING = object()
 # Helpers for dataclass / pydantic model dispatch
 
 
-def _is_model_instance(obj: Any) -> bool:
-    """Return ``True`` if *obj* is a pydantic model or dataclass instance."""
+def _is_model_or_dataclass(obj: Any) -> bool:
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return True
     return hasattr(obj, "model_dump") or (
@@ -37,10 +36,9 @@ def _is_model_instance(obj: Any) -> bool:
     )
 
 
-def _model_fields(obj: Any) -> dict[str, Any]:
-    """Return a ``{name: value}`` mapping for a dataclass, model, or dict."""
+def _to_dict(obj: Any) -> dict[str, Any]:
     if isinstance(obj, dict):
-        return obj
+        return dict(obj)
     if hasattr(obj, "model_dump"):
         return obj.model_dump()
     if hasattr(obj, "dict") and hasattr(obj, "__fields__"):
@@ -48,16 +46,6 @@ def _model_fields(obj: Any) -> dict[str, Any]:
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return {f.name: getattr(obj, f.name) for f in dataclasses.fields(obj)}
     return {}
-
-
-def _to_static_value(value: Any) -> Any:
-    """Convert a model/dataclass instance to a static dict copy.
-
-    Plain values (numbers, arrays, strings, dicts) are returned unchanged.
-    """
-    if _is_model_instance(value):
-        return _model_fields(value)
-    return value
 
 
 def _interpolate_field(easing: EasingFunction, p: float, v1: Any, v2: Any) -> Any:
@@ -79,8 +67,8 @@ def _interpolate_model(
     easing: EasingFunction, p: float, m1: Any, m2: Any
 ) -> dict[str, Any]:
     """Return a dict of per-field interpolated values between two models or dicts."""
-    f1 = _model_fields(m1)
-    f2 = _model_fields(m2)
+    f1 = _to_dict(m1)
+    f2 = _to_dict(m2)
     return {
         name: _interpolate_field(easing, p, f1[name], f2[name])
         for name in f1
@@ -90,7 +78,7 @@ def _interpolate_model(
 
 def _apply_model_value(target: Any, source: Any) -> None:
     """Apply field values from *source* (dict or model) to *target* in-place."""
-    data = source if isinstance(source, dict) else _model_fields(source)
+    data = source if isinstance(source, dict) else _to_dict(source)
     if not data:
         return
 
@@ -105,8 +93,8 @@ def _apply_model_value(target: Any, source: Any) -> None:
         try:
             if (
                 existing is not _MISSING
-                and _is_model_instance(existing)
-                and _is_model_instance(val)
+                and _is_model_or_dataclass(existing)
+                and _is_model_or_dataclass(val)
             ):
                 _apply_model_value(existing, val)
             else:
@@ -165,7 +153,7 @@ class Keyframe:
         easing: EasingFunction = EasingFunction.Linear,
     ) -> None:
         self.t = max(0, int(t))
-        self.value = _to_static_value(value)
+        self.value = _to_dict(value) if _is_model_or_dataclass(value) else value
         self.easing = easing
 
 
@@ -427,8 +415,8 @@ class Animation(EventedModel):
                 p = (frame - k1.t) / span
                 v1, v2 = k1.value, k2.value
                 if (
-                    _is_model_instance(v1)
-                    or _is_model_instance(v2)
+                    _is_model_or_dataclass(v1)
+                    or _is_model_or_dataclass(v2)
                     or (isinstance(v1, dict) and isinstance(v2, dict))
                 ):
                     return _interpolate_model(k1.easing, p, v1, v2)
@@ -454,7 +442,7 @@ class Animation(EventedModel):
             if value is None:
                 continue
             reference = getattr(model, field)
-            if _is_model_instance(reference):
+            if _is_model_or_dataclass(reference):
                 _apply_model_value(reference, value)
             else:
                 setattr(model, field, _coerce_value(reference, value))
