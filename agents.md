@@ -44,6 +44,7 @@ python examples/demo.py  # visual demo
 - Tests: pytest, offscreen Qt (`os.environ["QT_QPA_PLATFORM"] = "offscreen"`), session-scoped `qapp` fixture. Each test is self-contained (creates its own widget). No mocking — prefer direct attribute/signal inspection. Keep tests minimal and concise.
 - Follow pydantic v2 conventions (`model_dump`, `ConfigDict`, `field_validator`, etc.).
 - Make atomic commits — prefer smaller self-sufficient commits over one large one. If tests break due to an unrelated pre-existing issue, commit the code change first and fix tests separately.
+- do not worry about backward compatibility unless asked for. This repository is in early development stage.
 
 ## Common patterns
 
