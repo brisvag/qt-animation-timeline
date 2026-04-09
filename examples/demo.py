@@ -1,21 +1,17 @@
-"""Interactive demo of AnimationTimelineWidget with two models and debug output.
+"""Interactive demo of AnimationTimelineWidget.
 
 Run with::
 
     python examples/demo.py
 
-The demo creates a ``Camera`` model and a ``Light`` model, each bound to a set
-of tracks.  Moving the playhead, changing an easing function, or repositioning
-a keyframe all print the current field values for both models to stdout so it
-is immediately clear what caused each update.
-Requires NumPy (``pip install numpy``).
+Requires NumPy and pydantic (``pip install numpy pydantic``).
 """
 
 from __future__ import annotations
 
 import sys
 
-import numpy as np
+from pydantic import BaseModel
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
@@ -32,34 +28,40 @@ class Camera:
         self.zoom: float = 1.0
 
 
-class Light:
+class Light(BaseModel):
     """Light model: intensity and Euler rotation angles."""
 
-    def __init__(self) -> None:
-        self.intensity: float = 1.0
-        self.angles: np.ndarray = np.array([0.0, 0.0, 0.0])
+    intensity: float = 1.0
+    angle_x: float = 0.0
+    angle_y: float = 0.0
+    angle_z: float = 0.0
 
 
-def build_demo() -> tuple[QWidget, AnimationTimelineWidget, Camera, Light]:
-    """Build and return the demo widget without starting the event loop."""
+def main() -> None:
+    """Run the demo application."""
+    app = QApplication(sys.argv)
+
     camera = Camera()
-    light = Light()
+
+    # Light is a pydantic model; it is passed as a whole model binding.
+    class _LightHolder:
+        light = Light()
+
+    holder = _LightHolder()
 
     timeline = AnimationTimelineWidget(
         track_options={
             "cam_x": (camera, "x"),
             "cam_y": (camera, "y"),
             "cam_zoom": (camera, "zoom"),
-            "light_intensity": (light, "intensity"),
-            "light_angles": (light, "angles"),
+            "light": (holder, "light"),
         }
     )
 
     timeline.add_track("cam_x")
     timeline.add_track("cam_y")
     timeline.add_track("cam_zoom")
-    timeline.add_track("light_intensity")
-    timeline.add_track("light_angles")
+    timeline.add_track("light")
 
     # Camera.x - starts at frame 20 to demonstrate non-zero origins.
     timeline.tracks[0].add_keyframe(20, value=50.0)
@@ -76,26 +78,22 @@ def build_demo() -> tuple[QWidget, AnimationTimelineWidget, Camera, Light]:
     timeline.tracks[2].add_keyframe(100, value=2.5)
     timeline.tracks[2].add_keyframe(200, value=1.0)
 
-    # Light.intensity
-    timeline.tracks[3].add_keyframe(0, value=1.0)
-    timeline.tracks[3].add_keyframe(150, value=0.2, easing=EasingFunction.Step)
-    timeline.tracks[3].add_keyframe(300, value=1.0)
-
-    # Light.angles - numpy array; Linear easing works element-wise.
-    timeline.tracks[4].add_keyframe(50, value=np.array([0.0, 0.0, 0.0]))
-    timeline.tracks[4].add_keyframe(150, value=np.array([45.0, 90.0, 180.0]))
-    timeline.tracks[4].add_keyframe(280, value=np.array([10.0, 20.0, 30.0]))
+    # Light — whole pydantic model; each field is interpolated independently.
+    timeline.tracks[3].add_keyframe(0, value=Light(intensity=1.0, angle_x=0.0, angle_y=0.0, angle_z=0.0))
+    timeline.tracks[3].add_keyframe(150, value=Light(intensity=0.2, angle_x=45.0, angle_y=90.0, angle_z=0.0), easing=EasingFunction.Step)
+    timeline.tracks[3].add_keyframe(300, value=Light(intensity=1.0, angle_x=10.0, angle_y=20.0, angle_z=30.0))
 
     info_label = QLabel("Move the playhead, reposition a keyframe, or change an easing to see values")
     info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
     def _print_state(reason: str) -> None:
         frame = timeline.current_frame
-        angles_str = "[" + ", ".join(f"{a:.1f}" for a in light.angles) + "]"
+        light = holder.light
         msg = (
             f"[{reason}] frame={frame:4d}  |  "
             f"Camera: x={camera.x:8.2f}  y={camera.y:8.2f}  zoom={camera.zoom:.2f}  |  "
-            f"Light: intensity={light.intensity:.2f}  angles={angles_str}"
+            f"Light: intensity={light.intensity:.2f}  "
+            f"angles=({light.angle_x:.1f}, {light.angle_y:.1f}, {light.angle_z:.1f})"
         )
         print(msg)
         info_label.setText(msg)
@@ -113,15 +111,9 @@ def build_demo() -> tuple[QWidget, AnimationTimelineWidget, Camera, Light]:
     main_widget.setWindowTitle("AnimationTimelineWidget - demo (Camera + Light)")
     main_widget.show()
 
-    return main_widget, timeline, camera, light
-
-
-def main() -> None:
-    """Run the demo application."""
-    app = QApplication(sys.argv)
-    _widget, _timeline, _camera, _light = build_demo()
     sys.exit(app.exec())
 
 
 if __name__ == "__main__":
     main()
+

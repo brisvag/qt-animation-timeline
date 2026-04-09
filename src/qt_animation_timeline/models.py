@@ -1,22 +1,10 @@
-"""Core data models: Keyframe, Track, and Animation.
-
-``Animation`` is a psygnal ``EventedModel`` that owns the full runtime state:
-track list, current frame, playback mode, and model bindings.  Its scalar
-fields (``current_frame``, ``playing``, ``play_mode``, ``play_direction``,
-``play_fps``, ``playback_speed``) emit signals automatically through the
-``.events`` namespace when assigned.  Structural changes (tracks, keyframes)
-emit the additional ``ClassVar`` signals (``track_added``, ``track_removed``,
-etc.) so observers can react with specific context.
-
-Playback timing (a ``QTimer``) lives in the widget layer; the widget calls
-:meth:`Animation.advance_playhead` on each tick.
-"""
+"""Core data models: Keyframe, Track, and Animation."""
 
 from __future__ import annotations
 
 import dataclasses
 import itertools
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 import numpy as np
 from psygnal import Signal
@@ -24,9 +12,6 @@ from psygnal._evented_model import EventedModel
 from pydantic import field_validator
 
 from qt_animation_timeline.easing import EasingFunction, _coerce_value
-
-if TYPE_CHECKING:
-    pass
 
 PLAY_NORMAL = 0
 PLAY_LOOP = 1
@@ -49,7 +34,9 @@ def _is_model_instance(obj: Any) -> bool:
 
 
 def _model_fields(obj: Any) -> dict[str, Any]:
-    """Return a ``{name: value}`` mapping for a dataclass or pydantic instance."""
+    """Return a ``{name: value}`` mapping for a dataclass, pydantic instance, or dict."""
+    if isinstance(obj, dict):
+        return obj
     if hasattr(obj, "model_dump"):
         return obj.model_dump()
     if hasattr(obj, "dict") and hasattr(obj, "__fields__"):
@@ -59,13 +46,18 @@ def _model_fields(obj: Any) -> dict[str, Any]:
     return {}
 
 
-def _interpolate_field(easing: EasingFunction, p: float, v1: Any, v2: Any) -> Any:
-    """Interpolate between *v1* and *v2* using *easing*, falling back to Step.
+def _to_static_value(value: Any) -> Any:
+    """Convert a model/dataclass instance to a static dict copy.
 
-    If *easing* is ``Linear`` but the values do not support arithmetic (e.g.
-    strings, booleans, or arbitrary Python objects), ``Step`` is used as a
-    silent fallback so that non-numeric model fields never raise ``TypeError``.
+    Plain values (numbers, arrays, strings, dicts) are returned unchanged.
     """
+    if _is_model_instance(value):
+        return _model_fields(value)
+    return value
+
+
+def _interpolate_field(easing: EasingFunction, p: float, v1: Any, v2: Any) -> Any:
+    """Interpolate between *v1* and *v2* using *easing*, falling back to Step."""
     if easing is not EasingFunction.Linear:
         return easing(p, v1, v2)
     try:
@@ -79,11 +71,7 @@ def _interpolate_field(easing: EasingFunction, p: float, v1: Any, v2: Any) -> An
 def _interpolate_model(
     easing: EasingFunction, p: float, m1: Any, m2: Any
 ) -> dict[str, Any]:
-    """Return a dict of per-field interpolated values between two model instances.
-
-    Each field is interpolated independently via :func:`_interpolate_field`,
-    which falls back to ``Step`` for non-numeric types automatically.
-    """
+    """Return a dict of per-field interpolated values between two model instances or dicts."""
     f1 = _model_fields(m1)
     f2 = _model_fields(m2)
     return {
@@ -94,12 +82,7 @@ def _interpolate_model(
 
 
 def _apply_model_value(target: Any, source: Any) -> None:
-    """Apply field values from *source* (dict or model instance) to *target* in-place.
-
-    Prefers a user-supplied ``update(dict)`` method.  Falls back to field-by-
-    field ``setattr``, skipping computed fields (properties) and recursing into
-    nested models.  Frozen models / dataclasses silently ignore unwritable fields.
-    """
+    """Apply field values from *source* (dict or model instance) to *target* in-place."""
     data = source if isinstance(source, dict) else _model_fields(source)
     if not data:
         return
@@ -175,7 +158,7 @@ class Keyframe:
         easing: EasingFunction = EasingFunction.Linear,
     ) -> None:
         self.t = max(0, int(t))
-        self.value = value
+        self.value = _to_static_value(value)
         self.easing = easing
 
 
@@ -436,7 +419,7 @@ class Animation(EventedModel):
                     return k2.value
                 p = (frame - k1.t) / span
                 v1, v2 = k1.value, k2.value
-                if _is_model_instance(v1) or _is_model_instance(v2):
+                if _is_model_instance(v1) or _is_model_instance(v2) or (isinstance(v1, dict) and isinstance(v2, dict)):
                     return _interpolate_model(k1.easing, p, v1, v2)
                 if isinstance(v1, (list, tuple)) or isinstance(v2, (list, tuple)):
                     v1 = np.asarray(v1, dtype=float)
@@ -464,7 +447,3 @@ class Animation(EventedModel):
                 _apply_model_value(reference, value)
             else:
                 setattr(model, field, _coerce_value(reference, value))
-
-
-# Backward-compatible alias
-AnimationState = Animation

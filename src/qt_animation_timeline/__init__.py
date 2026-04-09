@@ -11,11 +11,10 @@ __email__ = "brisvag@gmail.com"
 
 from qt_animation_timeline.easing import EasingFunction, _coerce_value
 from qt_animation_timeline.editor import AnimationTimelineWidget
-from qt_animation_timeline.models import Animation, AnimationState, Keyframe, Track
+from qt_animation_timeline.models import Animation, Keyframe, Track
 
 __all__ = [
     "Animation",
-    "AnimationState",  # backward-compat alias for Animation
     "AnimationTimelineWidget",
     "EasingFunction",
     "Keyframe",

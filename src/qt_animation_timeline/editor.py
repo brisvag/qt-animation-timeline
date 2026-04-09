@@ -31,11 +31,6 @@ from qt_animation_timeline.models import (
     Track,
 )
 
-# Aliases kept for any code that imports these names from this module.
-_PLAY_NORMAL = PLAY_NORMAL
-_PLAY_LOOP = PLAY_LOOP
-_PLAY_PINGPONG = PLAY_PINGPONG
-
 _DEFAULT_FRAME_WIDTH: float = 15.0
 _ZOOM_FACTOR: float = 1.15
 
@@ -173,6 +168,8 @@ class AnimationTimelineWidget(QWidget):
         self._scrubbing: bool = False
         self._box_start: QPoint | None = None
         self._box_rect: QRect | None = None
+        self._dragging_track: Track | None = None
+        self._track_drag_x: int = 0
 
         self.scroll_x: int = 0
         self.scroll_y: int = 0
@@ -298,14 +295,14 @@ class AnimationTimelineWidget(QWidget):
             (kf.t for t in self.state.tracks for kf in t.keyframes), default=50
         )
         w = int(self._left_margin_min + self.left_timeline_pad + (max_frame + 20) * _DEFAULT_FRAME_WIDTH)
-        h = self.top_margin + n * self.track_height + 20
+        h = self.top_margin + (n + 1) * self.track_height + 40
         return QSize(w, h)
 
     def minimumSizeHint(self) -> QSize:
         """Return the minimum useful size: 2 tracks high and 10 frames wide."""
         n = max(2, len(self.state.tracks))
         w = int(self._left_margin_min + self.left_timeline_pad + 10 * _DEFAULT_FRAME_WIDTH)
-        h = self.top_margin + n * self.track_height + 20
+        h = self.top_margin + (n + 1) * self.track_height + 40
         return QSize(w, h)
 
     def frame_to_x(self, frame: int | float) -> float:
@@ -506,23 +503,15 @@ class AnimationTimelineWidget(QWidget):
             )
 
     def _draw_add_button(self, painter: QPainter) -> None:
-        """Draw the add-track (+) button below all track labels.
-
-        Greyed out when no further track options are available.
-        The button is drawn in the same width and column layout as the
-        control buttons above so the edges line up exactly.
-        """
-        btn_w = self.left_margin // 3
+        """Draw the add-track (+) button below all track labels."""
         ay = self.top_margin + len(self.state.tracks) * self.track_height - self.scroll_y
         can_add = self.state._can_add_track()
         color = self.add_button_color if can_add else QColor(60, 60, 60)
         painter.setBrush(color)
         painter.setPen(Qt.PenStyle.NoPen)
-        # Fill the full label column so the background matches the control buttons.
         painter.drawRect(0, ay, self.left_margin, self.track_height)
-        # Draw the + icon in the same slot as the play button (rightmost third).
         icon_color = QColor(0, 0, 0) if can_add else QColor(100, 100, 100)
-        icon_rect = QRect(2 * btn_w, ay, self.left_margin - 2 * btn_w, self.track_height)
+        icon_rect = QRect(0, ay, self.left_margin, self.track_height)
         _render_svg_icon(painter, icon_rect, "plus", icon_color)
 
     def _draw_control_buttons(self, painter: QPainter) -> None:
@@ -614,8 +603,17 @@ class AnimationTimelineWidget(QWidget):
             self.selected_keyframes.clear()
             self._box_start = QPoint(x, y)
             self._box_rect = None
-        else:
-            self.selected_keyframes.clear()
+            self.update()
+            return
+
+        if self._is_on_track_line(x, y):
+            track_index = self.y_to_track_index(y)
+            if 0 <= track_index < len(self.state.tracks):
+                self._dragging_track = self.state.tracks[track_index]
+                self._track_drag_x = x
+                return
+
+        self.selected_keyframes.clear()
         self.update()
 
     def _handle_control_click(self, x: int, _y: int) -> None:
@@ -631,7 +629,9 @@ class AnimationTimelineWidget(QWidget):
         """Handle a left-click inside the label column (remove / add buttons)."""
         for i in range(len(self.state.tracks)):
             ty = self.top_margin + i * self.track_height - self.scroll_y
-            if 8 <= x <= 22 and ty + 13 <= y <= ty + 27:
+            btn_size = 14
+            by = ty + (self.track_height - btn_size) // 2
+            if 8 <= x <= 8 + btn_size and by <= y <= by + btn_size:
                 track = self.state.tracks[i]
                 self.state.remove_track(track)
                 return
@@ -661,6 +661,10 @@ class AnimationTimelineWidget(QWidget):
             self._set_playhead(max(0, self.x_to_frame(x)))
             return
 
+        if self._dragging_track is not None:
+            self._move_track_keyframes(x)
+            return
+
         if self._drag_pivot is not None:
             self._move_selected_keyframes(x)
             self._dragging_keyframes = True
@@ -673,13 +677,28 @@ class AnimationTimelineWidget(QWidget):
         if x >= self.left_margin and y >= self.top_margin:
             kf = self.pos_to_keyframe(x, y)
             if kf is not None:
+                value_str = repr(kf.value)
+                if len(value_str) > 40:
+                    value_str = value_str[:37] + "..."
                 QToolTip.showText(
                     event.globalPos(),
-                    f"t={kf.t}  value={kf.value!r}",
+                    f"t={kf.t}  easing={kf.easing.name}  value={value_str}",
                     self,
                 )
             else:
                 QToolTip.hideText()
+
+    def _move_track_keyframes(self, x: int) -> None:
+        assert self._dragging_track is not None
+        delta = self.x_to_frame(x) - self.x_to_frame(self._track_drag_x)
+        if delta == 0:
+            return
+        for kf in self._dragging_track.keyframes:
+            kf.t = max(0, kf.t + delta)
+        self._dragging_track.keyframes.sort(key=lambda k: k.t)
+        self._track_drag_x = x
+        self.update_scrollbars()
+        self.update()
 
     def _move_selected_keyframes(self, x: int) -> None:
         assert self._drag_pivot is not None
@@ -712,6 +731,10 @@ class AnimationTimelineWidget(QWidget):
         return result
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._dragging_track is not None:
+            self.state.notify_keyframes_moved(list(self._dragging_track.keyframes))
+            self._dragging_track = None
+
         if self._dragging_keyframes and self.selected_keyframes:
             self.state.notify_keyframes_moved(list(self.selected_keyframes))
 
@@ -887,7 +910,7 @@ class AnimationTimelineWidget(QWidget):
         track = self.state.tracks[track_index]
         options = self._get_track_change_options(track)
 
-        container = QWidget(None, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        container = QWidget(self, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         container.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(2, 2, 2, 2)
@@ -933,7 +956,7 @@ class AnimationTimelineWidget(QWidget):
         if not available:
             return
 
-        container = QWidget(None, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        container = QWidget(self, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         container.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(2, 2, 2, 2)
