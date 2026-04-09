@@ -115,6 +115,8 @@ def _apply_model_value(target: Any, source: Any) -> None:
 class _TrackOptionsDict(dict):
     """dict subclass that removes orphan tracks when keys are deleted."""
 
+    __slots__ = ("_animation",)
+
     def __init__(self, data: dict, animation: Animation) -> None:
         super().__init__(data)
         self._animation = animation
