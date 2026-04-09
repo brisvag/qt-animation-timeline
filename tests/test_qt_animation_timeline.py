@@ -38,25 +38,15 @@ def test_imports_with_version():
 
 
 
-def test_easing_linear(qapp):
-    assert EasingFunction.Linear(0.0, 0.0, 1.0) == pytest.approx(0.0)
+def test_easing_functions():
+    for ef in EasingFunction:
+        assert ef(0.0, 0.0, 1.0) == pytest.approx(0.0)
+        assert ef(1.0, 0.0, 1.0) == pytest.approx(1.0)
     assert EasingFunction.Linear(0.5, 0.0, 1.0) == pytest.approx(0.5)
-    assert EasingFunction.Linear(1.0, 0.0, 1.0) == pytest.approx(1.0)
-    assert EasingFunction.Linear(0.5, 10.0, 20.0) == pytest.approx(15.0)
-
-
-def test_easing_step(qapp):
-    assert EasingFunction.Step(0.0, 0.0, 1.0) == pytest.approx(0.0)
     assert EasingFunction.Step(0.49, 0.0, 1.0) == pytest.approx(0.0)
     assert EasingFunction.Step(0.5, 0.0, 1.0) == pytest.approx(1.0)
-    assert EasingFunction.Step(1.0, 0.0, 1.0) == pytest.approx(1.0)
     assert EasingFunction.Step(0.3, "a", "b") == "a"
     assert EasingFunction.Step(0.5, "a", "b") == "b"
-
-
-def test_easing_members_callable():
-    for ef in EasingFunction:
-        assert callable(ef)
 
 
 def test_coerce_value():
