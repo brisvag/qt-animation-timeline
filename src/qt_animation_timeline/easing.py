@@ -29,8 +29,9 @@ def _coerce_value(reference: Any, interpolated: Any) -> Any:
     if isinstance(reference, (list, tuple)):
         arr = np.asarray(interpolated)
         if isinstance(reference, tuple):
-            return type(reference)([_coerce_value(r, v) for r, v in zip(reference, arr)])
-        return [_coerce_value(r, v) for r, v in zip(reference, arr)]
+            pairs = zip(reference, arr, strict=False)
+            return type(reference)([_coerce_value(r, v) for r, v in pairs])
+        return [_coerce_value(r, v) for r, v in zip(reference, arr, strict=False)]
     # numpy arrays and other array-like / arbitrary types.
     return interpolated
 

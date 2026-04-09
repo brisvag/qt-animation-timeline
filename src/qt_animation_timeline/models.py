@@ -10,7 +10,7 @@ import numpy as np
 from psygnal import Signal
 from psygnal._evented_model import EventedModel
 from psygnal.containers import EventedList
-from pydantic import field_validator
+from pydantic import ConfigDict, Field, field_validator
 
 from qt_animation_timeline.easing import EasingFunction, _coerce_value
 
@@ -84,7 +84,7 @@ def _apply_model_value(target: Any, source: Any) -> None:
     if not data:
         return
 
-    if hasattr(target, "update") and callable(getattr(target, "update")):
+    if hasattr(target, "update") and callable(target.update):
         target.update(data)
         return
 
@@ -140,7 +140,7 @@ class _TrackOptionsDict(dict):
 class Keyframe(EventedModel):
     """A keyframe: time position, value, and easing for the segment after it."""
 
-    model_config = {"arbitrary_types_allowed": True, "validate_assignment": True}
+    model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
 
     t: int = 0
     value: Any = 0
@@ -173,7 +173,7 @@ class Track(EventedModel):
         RGB colour as an ``(r, g, b)`` tuple.  Defaults to ``(180, 180, 180)``.
     """
 
-    model_config = {"arbitrary_types_allowed": True, "validate_assignment": True}
+    model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
 
     name: str
     color: tuple[int, int, int] = (180, 180, 180)
@@ -222,7 +222,7 @@ class Animation(EventedModel):
         ``clear``, ``popitem``) automatically remove the matching tracks.
     """
 
-    model_config = {"arbitrary_types_allowed": True, "validate_assignment": True}
+    model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
 
     current_frame: int = 0
     playing: bool = False
@@ -230,7 +230,7 @@ class Animation(EventedModel):
     play_direction: int = 1
     play_fps: int = 30
     playback_speed: float = 1.0
-    easing_options: list = []
+    easing_options: list = Field(default_factory=list)
 
     keyframe_added: ClassVar[Signal] = Signal(object, object)
     keyframes_removed: ClassVar[Signal] = Signal(list)
@@ -406,7 +406,8 @@ class Animation(EventedModel):
                     return k2.value
                 p = (frame - k1.t) / span
                 v1, v2 = k1.value, k2.value
-                if _is_model_instance(v1) or _is_model_instance(v2) or (isinstance(v1, dict) and isinstance(v2, dict)):
+                is_model = _is_model_instance(v1) or _is_model_instance(v2)
+                if is_model or (isinstance(v1, dict) and isinstance(v2, dict)):
                     return _interpolate_model(k1.easing, p, v1, v2)
                 if isinstance(v1, (list, tuple)) or isinstance(v2, (list, tuple)):
                     v1 = np.asarray(v1, dtype=float)
