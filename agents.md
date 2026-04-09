@@ -29,21 +29,21 @@ tests/test_qt_animation_timeline.py
 ## Development commands
 
 ```sh
-uv sync                         # install deps
-uv run pytest                   # run tests (uses offscreen Qt)
-uv run pre-commit run --all-files  # lint (ruff check + ruff format + typos)
-python examples/demo.py         # visual demo
+uv sync                  # install deps
+uv run pytest            # run tests (uses offscreen Qt)
+prek --all-files         # lint (ruff check + ruff format + typos)
+python examples/demo.py  # visual demo
 ```
 
 ## Code style
 
-- `ruff` for formatting and linting (line length 88, target py310). Run before committing.
+- `ruff` for formatting and linting (line length 88, target py310). Prefer running `prek` to fix issues rather than editing manually.
 - `from __future__ import annotations` at top of every source file.
-- Section headers as `# ------------------------------------------------------------------` comments.
-- Short private helpers prefixed with `_`. Internal flags like `_dragging_keyframes` / `_track_moved` are plain `bool` attributes on the widget.
-- No inline comments for obvious code; doc comments use numpy-style docstrings.
-- Tests: pytest, offscreen Qt (`os.environ["QT_QPA_PLATFORM"] = "offscreen"`), session-scoped `qapp` fixture. Each test is self-contained (creates its own widget). No mocking — prefer direct attribute/signal inspection.
-- Commits follow conventional commits (`fix:`, `feat:`, `refactor:`, `ci:`, `docs:`).
+- No section-header comments or self-evident inline comments. Doc comments use numpy-style docstrings.
+- Short private helpers prefixed with `_`.
+- Tests: pytest, offscreen Qt (`os.environ["QT_QPA_PLATFORM"] = "offscreen"`), session-scoped `qapp` fixture. Each test is self-contained (creates its own widget). No mocking — prefer direct attribute/signal inspection. Keep tests minimal and concise.
+- Follow pydantic v2 conventions (`model_dump`, `ConfigDict`, `field_validator`, etc.).
+- Commits follow conventional commits (`fix:`, `feat:`, `refactor:`, `ci:`, `docs:`). Make atomic commits — prefer smaller self-sufficient commits over one large one. If tests break due to an unrelated pre-existing issue, commit the code change first and fix tests separately.
 
 ## Common patterns
 
@@ -69,11 +69,3 @@ track_options = {"pos": (model, "pos"), "whole_obj": (holder, "light")}
 # Scalar fields: coerced to reference type (int rounds, bool stays bool).
 # Model/dataclass fields: updated in-place field-by-field.
 ```
-
-## Things to watch out for
-
-- `tracks` and `_track_options` are set via `object.__setattr__` in `Animation.__init__` to bypass pydantic validation — don't try to declare them as pydantic fields.
-- `mouseReleaseEvent` must guard `notify_keyframes_moved` with the `_track_moved` / `_dragging_keyframes` flags; calling it unconditionally overwrites model state (see PR #12).
-- `_get_allowed_easings_for_track` restricts `bool` and `str` fields to `Step` only — keep that in sync if new types are added.
-- `_TrackOptionsDict` overrides `__delitem__`, `pop`, `popitem`, `clear` to trigger orphan-track cleanup; don't bypass it.
-- Widget `add_track` picks the next color from `track_color_cycle` (cycles round-robin); track color is stored as an `(r, g, b)` tuple on `Track`.
