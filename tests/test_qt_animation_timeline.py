@@ -884,6 +884,7 @@ def test_model_field_step_fallback(qapp):
     assert result_after == "b"
 
 
+def test_animation_state_signals(qapp):
     """Animation emits psygnal signals with no Qt dependency in signal logic."""
     state = AnimationState(track_options={"A": (object(), "x")})
 

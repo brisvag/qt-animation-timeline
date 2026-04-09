@@ -63,8 +63,8 @@ def _interpolate_field(easing: EasingFunction, p: float, v1: Any, v2: Any) -> An
     """Interpolate between *v1* and *v2* using *easing*, falling back to Step.
 
     If *easing* is ``Linear`` but the values do not support arithmetic (e.g.
-    strings or arbitrary objects), ``Step`` is used as a silent fallback so
-    that non-numeric model fields never raise ``TypeError``.
+    strings, booleans, or arbitrary Python objects), ``Step`` is used as a
+    silent fallback so that non-numeric model fields never raise ``TypeError``.
     """
     if easing is not EasingFunction.Linear:
         return easing(p, v1, v2)
