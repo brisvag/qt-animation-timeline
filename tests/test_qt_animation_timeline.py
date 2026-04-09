@@ -14,14 +14,17 @@ from qt_animation_timeline.easing import EasingFunction, _coerce_value
 from qt_animation_timeline.editor import (
     _BUTTON_ICONS,
     _DEFAULT_COLORS,
-    _PLAY_LOOP,
     _PLAY_MODE_ICONS,
-    _PLAY_NORMAL,
-    _PLAY_PINGPONG,
     AnimationTimelineWidget,
 )
-from qt_animation_timeline.models import Animation, Keyframe, Track
-from qt_animation_timeline.state import AnimationState, PLAY_LOOP, PLAY_NORMAL, PLAY_PINGPONG
+from qt_animation_timeline.models import (
+    Animation,
+    Keyframe,
+    PLAY_LOOP,
+    PLAY_NORMAL,
+    PLAY_PINGPONG,
+    Track,
+)
 
 
 @pytest.fixture(scope="session")
@@ -32,8 +35,7 @@ def qapp():
 def test_imports_with_version():
     assert isinstance(qt_animation_timeline.__version__, str)
     assert hasattr(qt_animation_timeline, "Animation")
-    assert hasattr(qt_animation_timeline, "AnimationState")  # backward-compat alias
-    assert qt_animation_timeline.AnimationState is qt_animation_timeline.Animation
+
 
 
 def test_easing_linear(qapp):
@@ -375,7 +377,7 @@ def test_can_add_track(qapp):
 
 
 def test_available_track_options(qapp):
-    state = AnimationState(track_options={"A": (object(), "x"), "B": (object(), "y")})
+    state = Animation(track_options={"A": (object(), "x"), "B": (object(), "y")})
     state.add_track("A")
     avail = state.available_track_options()
     assert "B" in avail and "A" not in avail
@@ -548,7 +550,7 @@ def test_arrow_keys(qapp):
 
 
 def test_play_modes(qapp):
-    state = AnimationState()
+    state = Animation()
     assert state.play_mode == PLAY_NORMAL
     state.cycle_play_mode()
     assert state.play_mode == PLAY_LOOP
@@ -559,7 +561,7 @@ def test_play_modes(qapp):
 
 
 def test_play_normal_stops_at_last_keyframe(qapp):
-    state = AnimationState()
+    state = Animation()
     state.add_track("A")
     state.tracks[0].add_keyframe(0, value=0.0)
     state.tracks[0].add_keyframe(5, value=1.0)
@@ -571,7 +573,7 @@ def test_play_normal_stops_at_last_keyframe(qapp):
 
 
 def test_play_loop_wraps(qapp):
-    state = AnimationState()
+    state = Animation()
     state.add_track("A")
     state.tracks[0].add_keyframe(0, value=0.0)
     state.tracks[0].add_keyframe(5, value=1.0)
@@ -582,7 +584,7 @@ def test_play_loop_wraps(qapp):
 
 
 def test_play_pingpong_reverses(qapp):
-    state = AnimationState()
+    state = Animation()
     state.add_track("A")
     state.tracks[0].add_keyframe(0, value=0.0)
     state.tracks[0].add_keyframe(5, value=1.0)
@@ -597,7 +599,7 @@ def test_play_pingpong_reverses(qapp):
 
 
 def test_play_no_keyframes(qapp):
-    state = AnimationState()
+    state = Animation()
     state.play_mode = PLAY_NORMAL
     state.playing = True
     state.advance_playhead()
@@ -616,9 +618,9 @@ def test_play_mode_icons():
     for key in _PLAY_MODE_ICONS.values():
         assert key in _BUTTON_ICONS
     assert len(set(_PLAY_MODE_ICONS.values())) == len(_PLAY_MODE_ICONS)
-    assert _PLAY_MODE_ICONS[_PLAY_NORMAL] not in (
-        _PLAY_MODE_ICONS[_PLAY_LOOP],
-        _PLAY_MODE_ICONS[_PLAY_PINGPONG],
+    assert _PLAY_MODE_ICONS[PLAY_NORMAL] not in (
+        _PLAY_MODE_ICONS[PLAY_LOOP],
+        _PLAY_MODE_ICONS[PLAY_PINGPONG],
     )
 
 
@@ -886,7 +888,7 @@ def test_model_field_step_fallback(qapp):
 
 def test_animation_state_signals(qapp):
     """Animation emits psygnal signals with no Qt dependency in signal logic."""
-    state = AnimationState(track_options={"A": (object(), "x")})
+    state = Animation(track_options={"A": (object(), "x")})
 
     # Scalar field signals are on .events.<name> (EventedModel style)
     frames = []
@@ -919,7 +921,7 @@ def test_state_keyframe_signals(qapp):
         x = 0.0
 
     m = Model()
-    state = AnimationState(track_options={"A": (m, "x")})
+    state = Animation(track_options={"A": (m, "x")})
     track = state.add_track("A")
 
     kf_events = []
