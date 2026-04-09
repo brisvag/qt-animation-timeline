@@ -1,5 +1,6 @@
-import os
 import dataclasses
+import os
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -20,9 +21,7 @@ from qt_animation_timeline.editor import (
 from qt_animation_timeline.models import (
     Animation,
     Keyframe,
-    PLAY_LOOP,
-    PLAY_NORMAL,
-    PLAY_PINGPONG,
+    PlayMode,
     Track,
 )
 
@@ -35,7 +34,6 @@ def qapp():
 def test_imports_with_version():
     assert isinstance(qt_animation_timeline.__version__, str)
     assert hasattr(qt_animation_timeline, "Animation")
-
 
 
 def test_easing_linear(qapp):
@@ -170,7 +168,9 @@ def test_delete_keyframes(qapp):
     w.selected_keyframes = [kf]
     removed = []
     w.keyframes_removed.connect(removed.append)
-    press = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier)
+    press = QKeyEvent(
+        QEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier
+    )
     w.keyPressEvent(press)
     assert len(w.tracks[0].keyframes) == 0
     assert removed == [[kf]]
@@ -191,7 +191,7 @@ def test_unique_track_options(qapp):
     w.add_track("B")
     options = _combo_options(w, 1)
     assert options.get("A") is False  # A is used by track 0 -> disabled for track 1
-    assert options.get("B") is True   # B is the current track's own name
+    assert options.get("B") is True  # B is the current track's own name
 
 
 def _make_press(x, y, shift=False, button=Qt.MouseButton.LeftButton):
@@ -292,7 +292,10 @@ def test_segment_left_keyframe(qapp):
     w3.resize(800, 300)
     w3.track_options = {"A": (object(), "x")}
     w3.add_track("A")
-    assert w3._segment_left_keyframe_at(int(w3.frame_to_x(10)), int(w3.track_center_y(0))) is None
+    assert (
+        w3._segment_left_keyframe_at(int(w3.frame_to_x(10)), int(w3.track_center_y(0)))
+        is None
+    )
 
 
 def test_track_model_dispatch(qapp):
@@ -412,7 +415,9 @@ def test_easing_preselection(qapp):
 
     assert w._get_allowed_easings_for_track(t_bool) == [EasingFunction.Step]
     allowed_float = w._get_allowed_easings_for_track(t_float)
-    assert EasingFunction.Linear in allowed_float and EasingFunction.Step in allowed_float
+    assert (
+        EasingFunction.Linear in allowed_float and EasingFunction.Step in allowed_float
+    )
 
 
 def test_right_double_click_ignored(qapp):
@@ -551,13 +556,13 @@ def test_arrow_keys(qapp):
 
 def test_play_modes(qapp):
     state = Animation()
-    assert state.play_mode == PLAY_NORMAL
+    assert state.play_mode == PlayMode.NORMAL
     state.cycle_play_mode()
-    assert state.play_mode == PLAY_LOOP
+    assert state.play_mode == PlayMode.LOOP
     state.cycle_play_mode()
-    assert state.play_mode == PLAY_PINGPONG
+    assert state.play_mode == PlayMode.PINGPONG
     state.cycle_play_mode()
-    assert state.play_mode == PLAY_NORMAL
+    assert state.play_mode == PlayMode.NORMAL
 
 
 def test_play_normal_stops_at_last_keyframe(qapp):
@@ -565,7 +570,7 @@ def test_play_normal_stops_at_last_keyframe(qapp):
     state.add_track("A")
     state.tracks[0].add_keyframe(0, value=0.0)
     state.tracks[0].add_keyframe(5, value=1.0)
-    state.play_mode = PLAY_NORMAL
+    state.play_mode = PlayMode.NORMAL
     state.playing = True
     state.current_frame = 5
     state.advance_playhead()
@@ -577,7 +582,7 @@ def test_play_loop_wraps(qapp):
     state.add_track("A")
     state.tracks[0].add_keyframe(0, value=0.0)
     state.tracks[0].add_keyframe(5, value=1.0)
-    state.play_mode = PLAY_LOOP
+    state.play_mode = PlayMode.LOOP
     state.current_frame = 5
     state.advance_playhead()
     assert state.current_frame == 0
@@ -588,7 +593,7 @@ def test_play_pingpong_reverses(qapp):
     state.add_track("A")
     state.tracks[0].add_keyframe(0, value=0.0)
     state.tracks[0].add_keyframe(5, value=1.0)
-    state.play_mode = PLAY_PINGPONG
+    state.play_mode = PlayMode.PINGPONG
     state.play_direction = 1
     state.current_frame = 5
     state.advance_playhead()
@@ -600,7 +605,7 @@ def test_play_pingpong_reverses(qapp):
 
 def test_play_no_keyframes(qapp):
     state = Animation()
-    state.play_mode = PLAY_NORMAL
+    state.play_mode = PlayMode.NORMAL
     state.playing = True
     state.advance_playhead()
     assert not state.playing
@@ -618,9 +623,9 @@ def test_play_mode_icons():
     for key in _PLAY_MODE_ICONS.values():
         assert key in _BUTTON_ICONS
     assert len(set(_PLAY_MODE_ICONS.values())) == len(_PLAY_MODE_ICONS)
-    assert _PLAY_MODE_ICONS[PLAY_NORMAL] not in (
-        _PLAY_MODE_ICONS[PLAY_LOOP],
-        _PLAY_MODE_ICONS[PLAY_PINGPONG],
+    assert _PLAY_MODE_ICONS[PlayMode.NORMAL] not in (
+        _PLAY_MODE_ICONS[PlayMode.LOOP],
+        _PLAY_MODE_ICONS[PlayMode.PINGPONG],
     )
 
 
@@ -641,7 +646,10 @@ def test_left_margin_auto_adjusts(qapp):
     w.update_scrollbars()
     margin_short = w.left_margin
 
-    w.track_options = {"A": (object(), "x"), "A very long track label name": (object(), "y")}
+    w.track_options = {
+        "A": (object(), "x"),
+        "A very long track label name": (object(), "y"),
+    }
     w.add_track("A very long track label name")
     w.update_scrollbars()
     margin_long = w.left_margin
@@ -687,7 +695,7 @@ def test_interpolate_list_and_tuple_values(qapp):
 
 def test_dispatch_list_and_tuple_cast_back(qapp):
     class Model:
-        pos_list = [0.0, 0.0]
+        pos_list: ClassVar = [0.0, 0.0]
         pos_tuple = (0.0, 0.0)
 
     m = Model()
@@ -776,7 +784,9 @@ def test_dispatch_dataclass_with_update_method(qapp):
     w = AnimationTimelineWidget()
     w.track_options = {"A": (m, "config")}
     w.add_track("A")
-    w.tracks[0].add_keyframe(0, value=Config(speed=1.0, enabled=True), easing=EasingFunction.Step)
+    w.tracks[0].add_keyframe(
+        0, value=Config(speed=1.0, enabled=True), easing=EasingFunction.Step
+    )
     w.tracks[0].add_keyframe(100, value=Config(speed=5.0, enabled=False))
     w._set_playhead(50)
     assert m.config is cfg and m.config.speed == pytest.approx(5.0)
@@ -846,6 +856,7 @@ def test_size_hint(qapp):
 
 def test_model_field_interpolation(qapp):
     """Keyframe values that are dataclass instances are interpolated field-by-field."""
+
     @dataclasses.dataclass
     class Pose:
         x: float = 0.0
@@ -888,7 +899,7 @@ def test_model_field_step_fallback(qapp):
 
 def test_numerical_string_stays_str(qapp):
     """Numerical string values must not be converted to floats/ints; Step is used."""
-    from qt_animation_timeline.models import _interpolate_field, Animation
+    from qt_animation_timeline.models import Animation, _interpolate_field
 
     # _interpolate_field: numerical strings stay as str and use Step.
     for p, expected in [(0.3, "10"), (0.5, "20"), (0.7, "20")]:
@@ -917,8 +928,9 @@ def test_numerical_string_stays_str(qapp):
 
 
 def test_numerical_string_model_field_stays_str(qapp):
-    """A dataclass field of type str with a numerical value stays str after interpolation."""
+    """A dataclass field of type str with a numerical value stays str after interp."""
     import dataclasses
+
     from qt_animation_timeline.models import Animation
 
     @dataclasses.dataclass
@@ -987,7 +999,7 @@ def test_animation_state_signals(qapp):
     play_states = []
     state.events.playing.connect(play_states.append)
     state.playing = True
-    state.playing = True   # no duplicate
+    state.playing = True  # no duplicate
     state.playing = False
     assert play_states == [True, False]
 
