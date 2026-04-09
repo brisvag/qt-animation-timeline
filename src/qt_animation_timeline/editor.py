@@ -165,6 +165,7 @@ class AnimationTimelineWidget(QWidget):
         self._drag_pivot: Keyframe | None = None
         self._drag_offset: int = 0
         self._dragging_keyframes: bool = False
+        self._track_moved: bool = False
         self._scrubbing: bool = False
         self._box_start: QPoint | None = None
         self._box_rect: QRect | None = None
@@ -697,6 +698,7 @@ class AnimationTimelineWidget(QWidget):
             kf.t = max(0, kf.t + delta)
         self._dragging_track.keyframes.sort(key=lambda k: k.t)
         self._track_drag_x = x
+        self._track_moved = True
         self.update_scrollbars()
         self.update()
 
@@ -732,8 +734,10 @@ class AnimationTimelineWidget(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if self._dragging_track is not None:
-            self.state.notify_keyframes_moved(list(self._dragging_track.keyframes))
+            if self._track_moved:
+                self.state.notify_keyframes_moved(list(self._dragging_track.keyframes))
             self._dragging_track = None
+            self._track_moved = False
 
         if self._dragging_keyframes and self.selected_keyframes:
             self.state.notify_keyframes_moved(list(self.selected_keyframes))
