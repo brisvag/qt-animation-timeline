@@ -584,13 +584,13 @@ def test_play_pingpong_reverses(qapp):
     state.tracks[0].add_keyframe(0, value=0.0)
     state.tracks[0].add_keyframe(5, value=1.0)
     state.play_mode = PLAY_PINGPONG
-    state._play_direction = 1
+    state.play_direction = 1
     state.current_frame = 5
     state.advance_playhead()
-    assert state._play_direction == -1
+    assert state.play_direction == -1
     state.current_frame = 0
     state.advance_playhead()
-    assert state._play_direction == 1
+    assert state.play_direction == 1
 
 
 def test_play_no_keyframes(qapp):

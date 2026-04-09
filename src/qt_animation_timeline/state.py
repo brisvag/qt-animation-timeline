@@ -212,6 +212,15 @@ class AnimationState:
             self._play_mode = value
             self.play_mode_changed.emit(value)
 
+    @property
+    def play_direction(self) -> int:
+        """Current playback direction: ``1`` (forward) or ``-1`` (reverse)."""
+        return self._play_direction
+
+    @play_direction.setter
+    def play_direction(self, value: int) -> None:
+        self._play_direction = value
+
     # ------------------------------------------------------------------
     # Track management
 
@@ -277,7 +286,7 @@ class AnimationState:
     def cycle_play_mode(self) -> None:
         """Cycle normal -> loop -> pingpong -> normal."""
         self.play_mode = (self._play_mode + 1) % 3
-        self._play_direction = 1
+        self.play_direction = 1
 
     def advance_playhead(self) -> None:
         """Advance one frame according to the current play mode.
@@ -296,10 +305,10 @@ class AnimationState:
                 next_frame = 0
         elif self._play_mode == PLAY_PINGPONG:
             if next_frame > max_frame:
-                self._play_direction = -1
+                self.play_direction = -1
                 next_frame = max(0, max_frame - 1)
             elif next_frame < 0:
-                self._play_direction = 1
+                self.play_direction = 1
                 next_frame = min(1, max_frame)
         self.current_frame = next_frame
 
@@ -312,10 +321,7 @@ class AnimationState:
         When ``track_options`` is empty there are no options to choose from,
         so no tracks can be added via the popup.
         """
-        if not self.track_options:
-            return False
-        used = {t.name for t in self.tracks}
-        return len(used) < len(self.track_options)
+        return bool(self.available_track_options())
 
     def available_track_options(self) -> list[str]:
         """Return track option names that are not yet used by any track."""

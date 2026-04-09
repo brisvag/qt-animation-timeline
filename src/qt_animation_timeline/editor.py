@@ -1044,7 +1044,6 @@ class AnimationTimelineWidget(QWidget):
             color = (qcolor.red(), qcolor.green(), qcolor.blue()) if qcolor else (180, 180, 180)
         return self.state.add_track(name, color)
 
-    # Deprecated alias kept for now so tests that iterate w._interpolate_track still pass.
     def _interpolate_track(self, track: Track, frame: int) -> Any:
         return self.state.interpolate_track(track, frame)
 
