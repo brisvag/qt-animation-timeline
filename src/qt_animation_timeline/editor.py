@@ -36,12 +36,12 @@ _ZOOM_FACTOR: float = 1.15
 
 # Okabe-Ito colorblind-friendly palette (seven distinguishable colors).
 _DEFAULT_TRACK_COLORS = [
-    QColor(0, 114, 178),    # blue
-    QColor(230, 159, 0),    # orange
-    QColor(0, 158, 115),    # bluish green
-    QColor(86, 180, 233),   # sky blue
-    QColor(213, 94, 0),     # vermilion
-    QColor(240, 228, 66),   # yellow
+    QColor(0, 114, 178),  # blue
+    QColor(230, 159, 0),  # orange
+    QColor(0, 158, 115),  # bluish green
+    QColor(86, 180, 233),  # sky blue
+    QColor(213, 94, 0),  # vermilion
+    QColor(240, 228, 66),  # yellow
     QColor(204, 121, 167),  # reddish purple
 ]
 
@@ -72,18 +72,20 @@ _PLAY_MODE_ICONS = {
 
 # SVG path data (Material Design, viewBox "0 0 24 24") for every button icon.
 _BUTTON_ICONS: dict[str, str] = {
-    "home":      "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z",
-    "play":      "M8 5v14l11-7z",
-    "pause":     "M6 19h4V5H6v14zm8-14v14h4V5h-4z",
+    "home": "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z",
+    "play": "M8 5v14l11-7z",
+    "pause": "M6 19h4V5H6v14zm8-14v14h4V5h-4z",
     "play_once": "M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z",
-    "loop":      "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v5z",
-    "pingpong":  "M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z",
-    "plus":      "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z",
-    "minus":     "M19 13H5v-2h14v2z",
+    "loop": "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v5z",
+    "pingpong": "M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z",  # noqa: E501
+    "plus": "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z",
+    "minus": "M19 13H5v-2h14v2z",
 }
 
 
-def _render_svg_icon(painter: QPainter, rect: QRect, icon_key: str, color: QColor) -> None:
+def _render_svg_icon(
+    painter: QPainter, rect: QRect, icon_key: str, color: QColor
+) -> None:
     """Render a named SVG icon centred within *rect* using *color* as the fill.
 
     The icon is always drawn as a square region centred inside *rect* so that
@@ -152,7 +154,9 @@ class AnimationTimelineWidget(QWidget):
         self.max_frame_width: float = 80.0
 
         self.track_color_cycle: list[QColor] = (
-            list(track_color_cycle) if track_color_cycle is not None else list(_DEFAULT_TRACK_COLORS)
+            list(track_color_cycle)
+            if track_color_cycle is not None
+            else list(_DEFAULT_TRACK_COLORS)
         )
         self.easing_options: list[EasingFunction] = list(EasingFunction)
 
@@ -216,7 +220,9 @@ class AnimationTimelineWidget(QWidget):
 
     def _on_state_track_removed(self, track: Track) -> None:
         removed_kfs = set(track.keyframes)
-        self.selected_keyframes = [kf for kf in self.selected_keyframes if kf not in removed_kfs]
+        self.selected_keyframes = [
+            kf for kf in self.selected_keyframes if kf not in removed_kfs
+        ]
         self.updateGeometry()
         self.update_scrollbars()
         self.update()
@@ -250,7 +256,9 @@ class AnimationTimelineWidget(QWidget):
 
     def _on_state_playing_changed(self, playing: bool) -> None:
         if playing:
-            interval = max(1, int(1000 / (self.state.play_fps * self.state.playback_speed)))
+            interval = max(
+                1, int(1000 / (self.state.play_fps * self.state.playback_speed))
+            )
             self._play_timer.start(interval)
         else:
             self._play_timer.stop()
@@ -295,14 +303,20 @@ class AnimationTimelineWidget(QWidget):
         max_frame = max(
             (kf.t for t in self.state.tracks for kf in t.keyframes), default=50
         )
-        w = int(self._left_margin_min + self.left_timeline_pad + (max_frame + 20) * _DEFAULT_FRAME_WIDTH)
+        w = int(
+            self._left_margin_min
+            + self.left_timeline_pad
+            + (max_frame + 20) * _DEFAULT_FRAME_WIDTH
+        )
         h = self.top_margin + (n + 1) * self.track_height + 40
         return QSize(w, h)
 
     def minimumSizeHint(self) -> QSize:
         """Return the minimum useful size: 2 tracks high and 10 frames wide."""
         n = max(2, len(self.state.tracks))
-        w = int(self._left_margin_min + self.left_timeline_pad + 10 * _DEFAULT_FRAME_WIDTH)
+        w = int(
+            self._left_margin_min + self.left_timeline_pad + 10 * _DEFAULT_FRAME_WIDTH
+        )
         h = self.top_margin + (n + 1) * self.track_height + 40
         return QSize(w, h)
 
@@ -341,11 +355,12 @@ class AnimationTimelineWidget(QWidget):
         self.v_scroll.setGeometry(self.width() - 20, 0, 20, self.height() - hsw)
         self.update_scrollbars()
 
-
     def update_scrollbars(self) -> None:
         """Recalculate scrollbar ranges based on content size."""
         self._update_left_margin()
-        max_frame = max((kf.t for t in self.state.tracks for kf in t.keyframes), default=0)
+        max_frame = max(
+            (kf.t for t in self.state.tracks for kf in t.keyframes), default=0
+        )
         content_width = self.left_timeline_pad + (max_frame + 20) * self.frame_width
         page_w = self.width() - self.left_margin
         need_hscroll = content_width > page_w
@@ -449,8 +464,10 @@ class AnimationTimelineWidget(QWidget):
         for i in range(len(self.state.tracks)):
             y = self.top_margin + i * self.track_height - self.scroll_y
             painter.fillRect(
-                self.left_margin, y,
-                self.width() - self.left_margin, self.track_height,
+                self.left_margin,
+                y,
+                self.width() - self.left_margin,
+                self.track_height,
                 self.track_bg_color,
             )
 
@@ -505,7 +522,9 @@ class AnimationTimelineWidget(QWidget):
 
     def _draw_add_button(self, painter: QPainter) -> None:
         """Draw the add-track (+) button below all track labels."""
-        ay = self.top_margin + len(self.state.tracks) * self.track_height - self.scroll_y
+        ay = (
+            self.top_margin + len(self.state.tracks) * self.track_height - self.scroll_y
+        )
         can_add = self.state._can_add_track()
         color = self.add_button_color if can_add else QColor(60, 60, 60)
         painter.setBrush(color)
@@ -522,14 +541,23 @@ class AnimationTimelineWidget(QWidget):
         h = self.top_margin
 
         painter.fillRect(QRect(0, 0, btn_w, h), self.control_btn_color)
-        _render_svg_icon(painter, QRect(0, 0, btn_w, h), "home", self.control_btn_text_color)
+        _render_svg_icon(
+            painter, QRect(0, 0, btn_w, h), "home", self.control_btn_text_color
+        )
 
         painter.fillRect(QRect(btn_w, 0, btn_w, h), self.loop_btn_color)
-        _render_svg_icon(painter, QRect(btn_w, 0, btn_w, h), _PLAY_MODE_ICONS[self.state.play_mode], self.loop_btn_text_color)
+        _render_svg_icon(
+            painter,
+            QRect(btn_w, 0, btn_w, h),
+            _PLAY_MODE_ICONS[self.state.play_mode],
+            self.loop_btn_text_color,
+        )
 
         play_icon = "pause" if self.state.playing else "play"
         painter.fillRect(QRect(2 * btn_w, 0, btn_w3, h), self.play_btn_color)
-        _render_svg_icon(painter, QRect(2 * btn_w, 0, btn_w3, h), play_icon, self.play_btn_text_color)
+        _render_svg_icon(
+            painter, QRect(2 * btn_w, 0, btn_w3, h), play_icon, self.play_btn_text_color
+        )
 
     def _draw_rubber_band(self, painter: QPainter) -> None:
         assert self._box_rect is not None
@@ -546,8 +574,10 @@ class AnimationTimelineWidget(QWidget):
             painter.setPen(QPen(track_color, self.line_thickness))
             for k1, k2 in itertools.pairwise(track.keyframes):
                 painter.drawLine(
-                    int(self.frame_to_x(k1.t)), cy,
-                    int(self.frame_to_x(k2.t)), cy,
+                    int(self.frame_to_x(k1.t)),
+                    cy,
+                    int(self.frame_to_x(k2.t)),
+                    cy,
                 )
 
         for kf in track.keyframes:
@@ -637,7 +667,9 @@ class AnimationTimelineWidget(QWidget):
                 self.state.remove_track(track)
                 return
 
-        ay = self.top_margin + len(self.state.tracks) * self.track_height - self.scroll_y
+        ay = (
+            self.top_margin + len(self.state.tracks) * self.track_height - self.scroll_y
+        )
         if ay <= y <= ay + self.track_height and self.state._can_add_track():
             self._show_add_track_popup(global_pos)
 
@@ -827,21 +859,14 @@ class AnimationTimelineWidget(QWidget):
         For ``bool`` fields only ``Step`` is offered since linear interpolation
         of 0/1 produces non-boolean intermediates.
         """
-        binding = self.state.track_options.get(track.name)
-        if binding is None:
-            return self.easing_options
-        model, field = binding
-        try:
-            value = getattr(model, field)
-        except AttributeError:
-            return self.easing_options
+        model, field = self.state.track_options[track.name]
+        value = getattr(model, field)
         if isinstance(value, (bool, str)):
-            return [ef for ef in self.easing_options if ef is EasingFunction.Step]
+            return [EasingFunction.Step]
         return self.easing_options
 
     def _is_on_track_line(self, x: int, y: int) -> bool:
-        """Return ``True`` if *(x, y)* is within ``line_thickness + 4`` pixels
-        of a track's horizontal centre line."""
+        """True if within ``line_thickness + 4`` pixels of track center line."""
         track_index = self.y_to_track_index(y)
         if not (0 <= track_index < len(self.state.tracks)):
             return False
@@ -864,7 +889,9 @@ class AnimationTimelineWidget(QWidget):
 
         track_index = self.y_to_track_index(y)
         track = (
-            self.state.tracks[track_index] if 0 <= track_index < len(self.state.tracks) else None
+            self.state.tracks[track_index]
+            if 0 <= track_index < len(self.state.tracks)
+            else None
         )
         allowed = (
             self._get_allowed_easings_for_track(track)
@@ -894,13 +921,8 @@ class AnimationTimelineWidget(QWidget):
 
         Options already used by *other* tracks are disabled to enforce uniqueness.
         """
-        used_by_others = {
-            t.name for t in self.state.tracks if t is not track
-        }
-        return [
-            (opt, opt not in used_by_others)
-            for opt in self.state.track_options
-        ]
+        used_by_others = {t.name for t in self.state.tracks if t is not track}
+        return [(opt, opt not in used_by_others) for opt in self.state.track_options]
 
     def _show_track_change_menu(self, y: int, global_pos: object) -> None:
         """Show a searchable combo-box for changing a track's binding.
@@ -914,7 +936,9 @@ class AnimationTimelineWidget(QWidget):
         track = self.state.tracks[track_index]
         options = self._get_track_change_options(track)
 
-        container = QWidget(self, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        container = QWidget(
+            self, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint
+        )
         container.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(2, 2, 2, 2)
@@ -960,7 +984,9 @@ class AnimationTimelineWidget(QWidget):
         if not available:
             return
 
-        container = QWidget(self, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        container = QWidget(
+            self, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint
+        )
         container.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(2, 2, 2, 2)
@@ -1095,10 +1121,18 @@ class AnimationTimelineWidget(QWidget):
     def add_track(self, name: str, color: tuple[int, int, int] | None = None) -> Track:
         """Add a new track with an auto-assigned colour and return it."""
         if color is None:
-            qcolor = self.track_color_cycle[
-                len(self.state.tracks) % len(self.track_color_cycle)
-            ] if self.track_color_cycle else None
-            color = (qcolor.red(), qcolor.green(), qcolor.blue()) if qcolor else (180, 180, 180)
+            qcolor = (
+                self.track_color_cycle[
+                    len(self.state.tracks) % len(self.track_color_cycle)
+                ]
+                if self.track_color_cycle
+                else None
+            )
+            color = (
+                (qcolor.red(), qcolor.green(), qcolor.blue())
+                if qcolor
+                else (180, 180, 180)
+            )
         return self.state.add_track(name, color)
 
     def _interpolate_track(self, track: Track, frame: int) -> Any:

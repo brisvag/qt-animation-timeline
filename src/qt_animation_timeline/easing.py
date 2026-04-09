@@ -5,8 +5,6 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-import numpy as np
-
 
 def _coerce_value(reference: Any, interpolated: Any) -> Any:
     """Coerce *interpolated* to match the type of *reference*.
@@ -18,20 +16,17 @@ def _coerce_value(reference: Any, interpolated: Any) -> Any:
     types are also returned unchanged — they arise only from the ``Step``
     easing which returns the original value directly.
     """
-    # bool must be checked before int — bool is a subclass of int.
-    if isinstance(reference, bool):
-        return bool(round(float(interpolated)))
+    # interpolation is all or nothing for str and bool, no need to cast
+    if isinstance(reference, str | bool):
+        return interpolated
     if isinstance(reference, int):
-        return round(float(interpolated))
-    if isinstance(reference, float):
-        return float(interpolated)
+        return round(interpolated)
     # list / tuple (including nested): cast each element back recursively.
     if isinstance(reference, (list, tuple)):
-        arr = np.asarray(interpolated)
-        if isinstance(reference, tuple):
-            return type(reference)([_coerce_value(r, v) for r, v in zip(reference, arr)])
-        return [_coerce_value(r, v) for r, v in zip(reference, arr)]
-    # numpy arrays and other array-like / arbitrary types.
+        return type(reference)(
+            [_coerce_value(r, v) for r, v in zip(reference, interpolated, strict=True)]
+        )
+    # numpy arrays and anything else
     return interpolated
 
 
