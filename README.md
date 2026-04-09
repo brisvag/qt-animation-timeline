@@ -1,8 +1,8 @@
-# qt-animation-editor
+# qt-animation-timeline
 
-[![License](https://img.shields.io/pypi/l/qt-animation-editor.svg?color=green)](https://github.com/brisvag/qt-animation-editor/qt-animation-editor/raw/main/LICENSE)
-[![PyPI](https://img.shields.io/pypi/v/qt-animation-editor.svg?color=green)](https://pypi.org/project/qt-animation-editor)
-[![Python Version](https://img.shields.io/pypi/pyversions/qt-animation-editor.svg?color=green)](https://python.org)
+[![License](https://img.shields.io/pypi/l/qt-animation-timeline.svg?color=green)](https://github.com/brisvag/qt-animation-editor/qt-animation-editor/raw/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/qt-animation-timeline.svg?color=green)](https://pypi.org/project/qt-animation-timeline)
+[![Python Version](https://img.shields.io/pypi/pyversions/qt-animation-timeline.svg?color=green)](https://python.org)
 [![CI](https://github.com/brisvag/qt-animation-editor/qt-animation-editor/actions/workflows/ci.yml/badge.svg)](https://github.com/brisvag/qt-animation-editor/qt-animation-editor/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/brisvag/qt-animation-editor/qt-animation-editor/branch/main/graph/badge.svg)](https://codecov.io/gh/brisvag/qt-animation-editor/qt-animation-editor)
 

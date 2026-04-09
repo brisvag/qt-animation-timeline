@@ -18,8 +18,8 @@ import numpy as np
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
-from qt_animation_editor.easing import EasingFunction
-from qt_animation_editor.editor import AnimationTimelineWidget
+from qt_animation_timeline.easing import EasingFunction
+from qt_animation_timeline.editor import AnimationTimelineWidget
 
 
 class Camera:

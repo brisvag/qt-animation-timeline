@@ -5,7 +5,7 @@ author_email: brisvag@gmail.com
 author_name: Lorenzo Gaifas
 github_username: brisvag/qt-animation-editor
 mode: tooling
-module_name: qt_animation_editor
-project_name: qt-animation-editor
+module_name: qt_animation_timeline
+project_name: qt-animation-timeline
 project_short_description: Package description.
 
