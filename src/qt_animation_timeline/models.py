@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
+from enum import Enum, auto
 from typing import Any, ClassVar
 
 import numpy as np
 from psygnal import Signal
 from psygnal._evented_model import EventedModel
-from pydantic import field_validator
+from pydantic import ConfigDict, field_validator
 
 from qt_animation_timeline.easing import EasingFunction, _coerce_value
 
-PLAY_NORMAL = 0
-PLAY_LOOP = 1
-PLAY_PINGPONG = 2
+
+class PlayMode(int, Enum):
+    NORMAL = auto()
+    LOOP = auto()
+    PINGPONG = auto()
+
 
 _MISSING = object()
 
@@ -34,7 +38,7 @@ def _is_model_instance(obj: Any) -> bool:
 
 
 def _model_fields(obj: Any) -> dict[str, Any]:
-    """Return a ``{name: value}`` mapping for a dataclass, pydantic instance, or dict."""
+    """Return a ``{name: value}`` mapping for a dataclass, model, or dict."""
     if isinstance(obj, dict):
         return obj
     if hasattr(obj, "model_dump"):
@@ -74,7 +78,7 @@ def _interpolate_field(easing: EasingFunction, p: float, v1: Any, v2: Any) -> An
 def _interpolate_model(
     easing: EasingFunction, p: float, m1: Any, m2: Any
 ) -> dict[str, Any]:
-    """Return a dict of per-field interpolated values between two model instances or dicts."""
+    """Return a dict of per-field interpolated values between two models or dicts."""
     f1 = _model_fields(m1)
     f2 = _model_fields(m2)
     return {
@@ -85,12 +89,12 @@ def _interpolate_model(
 
 
 def _apply_model_value(target: Any, source: Any) -> None:
-    """Apply field values from *source* (dict or model instance) to *target* in-place."""
+    """Apply field values from *source* (dict or model) to *target* in-place."""
     data = source if isinstance(source, dict) else _model_fields(source)
     if not data:
         return
 
-    if hasattr(target, "update") and callable(getattr(target, "update")):
+    if hasattr(target, "update") and callable(target.update):
         target.update(data)
         return
 
@@ -224,12 +228,12 @@ class Animation(EventedModel):
         ``clear``, ``popitem``) automatically remove the matching tracks.
     """
 
-    model_config = {"arbitrary_types_allowed": True, "validate_assignment": True}
+    model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
 
     # Evented scalar fields — signals auto-emitted via .events.<name>
     current_frame: int = 0
     playing: bool = False
-    play_mode: int = PLAY_NORMAL
+    play_mode: PlayMode = PlayMode.NORMAL
     play_direction: int = 1
     play_fps: int = 30
     playback_speed: float = 1.0
@@ -356,7 +360,7 @@ class Animation(EventedModel):
 
     def cycle_play_mode(self) -> None:
         """Cycle normal -> loop -> pingpong -> normal."""
-        self.play_mode = (self.play_mode + 1) % 3
+        self.play_mode = PlayMode(1 + (self.play_mode + 1) % 3)
         self.play_direction = 1
 
     def advance_playhead(self) -> None:
@@ -367,15 +371,15 @@ class Animation(EventedModel):
         tracks: list[Track] = self.tracks  # type: ignore[attr-defined]
         max_frame = max((kf.t for t in tracks for kf in t.keyframes), default=0)
         next_frame = self.current_frame + self.play_direction
-        if self.play_mode == PLAY_NORMAL:
+        if self.play_mode == PlayMode.NORMAL:
             if next_frame > max_frame:
                 self.playing = False
                 self.current_frame = max_frame
                 return
-        elif self.play_mode == PLAY_LOOP:
+        elif self.play_mode == PlayMode.LOOP:
             if next_frame > max_frame:
                 next_frame = 0
-        elif self.play_mode == PLAY_PINGPONG:
+        elif self.play_mode == PlayMode.PINGPONG:
             if next_frame > max_frame:
                 self.play_direction = -1
                 next_frame = max(0, max_frame - 1)
@@ -422,7 +426,11 @@ class Animation(EventedModel):
                     return k2.value
                 p = (frame - k1.t) / span
                 v1, v2 = k1.value, k2.value
-                if _is_model_instance(v1) or _is_model_instance(v2) or (isinstance(v1, dict) and isinstance(v2, dict)):
+                if (
+                    _is_model_instance(v1)
+                    or _is_model_instance(v2)
+                    or (isinstance(v1, dict) and isinstance(v2, dict))
+                ):
                     return _interpolate_model(k1.easing, p, v1, v2)
                 if isinstance(v1, (list, tuple)) or isinstance(v2, (list, tuple)):
                     v1 = np.asarray(v1, dtype=float)

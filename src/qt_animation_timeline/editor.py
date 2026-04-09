@@ -23,11 +23,9 @@ from superqt import QSearchableComboBox
 
 from qt_animation_timeline.easing import EasingFunction
 from qt_animation_timeline.models import (
-    PLAY_LOOP,
-    PLAY_NORMAL,
-    PLAY_PINGPONG,
     Animation,
     Keyframe,
+    PlayMode,
     Track,
 )
 
@@ -65,9 +63,9 @@ _DEFAULT_COLORS: dict[str, QColor] = {
 }
 
 _PLAY_MODE_ICONS = {
-    PLAY_NORMAL: "play_once",
-    PLAY_LOOP: "loop",
-    PLAY_PINGPONG: "pingpong",
+    PlayMode.NORMAL: "play_once",
+    PlayMode.LOOP: "loop",
+    PlayMode.PINGPONG: "pingpong",
 }
 
 # SVG path data (Material Design, viewBox "0 0 24 24") for every button icon.
