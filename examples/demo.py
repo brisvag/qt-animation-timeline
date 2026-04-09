@@ -64,30 +64,42 @@ def main() -> None:
     timeline.add_track("light")
 
     # Camera.x - starts at frame 20 to demonstrate non-zero origins.
-    timeline.tracks[0].add_keyframe(20, value=50.0)
-    timeline.tracks[0].add_keyframe(100, value=200.0)
-    timeline.tracks[0].add_keyframe(200, value=50.0)
+    timeline.animation.tracks[0].add_keyframe(20, value=50.0)
+    timeline.animation.tracks[0].add_keyframe(100, value=200.0)
+    timeline.animation.tracks[0].add_keyframe(200, value=50.0)
 
     # Camera.y
-    timeline.tracks[1].add_keyframe(0, value=0.0)
-    timeline.tracks[1].add_keyframe(150, value=100.0, easing=EasingFunction.Step)
-    timeline.tracks[1].add_keyframe(300, value=0.0)
+    timeline.animation.tracks[1].add_keyframe(0, value=0.0)
+    timeline.animation.tracks[1].add_keyframe(
+        150, value=100.0, easing=EasingFunction.Step
+    )
+    timeline.animation.tracks[1].add_keyframe(300, value=0.0)
 
     # Camera.zoom
-    timeline.tracks[2].add_keyframe(0, value=1.0)
-    timeline.tracks[2].add_keyframe(100, value=2.5)
-    timeline.tracks[2].add_keyframe(200, value=1.0)
+    timeline.animation.tracks[2].add_keyframe(0, value=1.0)
+    timeline.animation.tracks[2].add_keyframe(100, value=2.5)
+    timeline.animation.tracks[2].add_keyframe(200, value=1.0)
 
     # Light — whole pydantic model; each field is interpolated independently.
-    timeline.tracks[3].add_keyframe(0, value=Light(intensity=1.0, angle_x=0.0, angle_y=0.0, angle_z=0.0))
-    timeline.tracks[3].add_keyframe(150, value=Light(intensity=0.2, angle_x=45.0, angle_y=90.0, angle_z=0.0), easing=EasingFunction.Step)
-    timeline.tracks[3].add_keyframe(300, value=Light(intensity=1.0, angle_x=10.0, angle_y=20.0, angle_z=30.0))
+    timeline.animation.tracks[3].add_keyframe(
+        0, value=Light(intensity=1.0, angle_x=0.0, angle_y=0.0, angle_z=0.0)
+    )
+    timeline.animation.tracks[3].add_keyframe(
+        150,
+        value=Light(intensity=0.2, angle_x=45.0, angle_y=90.0, angle_z=0.0),
+        easing=EasingFunction.Step,
+    )
+    timeline.animation.tracks[3].add_keyframe(
+        300, value=Light(intensity=1.0, angle_x=10.0, angle_y=20.0, angle_z=30.0)
+    )
 
-    info_label = QLabel("Move the playhead, reposition a keyframe, or change an easing to see values")
+    info_label = QLabel(
+        "Move the playhead, reposition a keyframe, or change an easing to see values"
+    )
     info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
     def _print_state(reason: str) -> None:
-        frame = timeline.current_frame
+        frame = timeline.animation.current_frame
         light = holder.light
         msg = (
             f"[{reason}] frame={frame:4d}  |  "
@@ -116,4 +128,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
