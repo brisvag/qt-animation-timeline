@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
-from enum import Enum, auto
+from enum import Enum
 from typing import Any, ClassVar
 
 import numpy as np
@@ -16,9 +16,9 @@ from qt_animation_timeline.easing import EasingFunction, _coerce_value
 
 
 class PlayMode(int, Enum):
-    NORMAL = auto()
-    LOOP = auto()
-    PINGPONG = auto()
+    NORMAL = 0
+    LOOP = 1
+    PINGPONG = 2
 
 
 _MISSING = object()
@@ -348,7 +348,7 @@ class Animation(EventedModel):
 
     def cycle_play_mode(self) -> None:
         """Cycle normal -> loop -> pingpong -> normal."""
-        self.play_mode = PlayMode(1 + (self.play_mode + 1) % 3)
+        self.play_mode = PlayMode((self.play_mode + 1) % 3)
         self.play_direction = 1
 
     def advance_playhead(self) -> None:
