@@ -35,7 +35,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 # add your package dependencies here
-dependencies = ["qtpy", "superqt", "numpy", "psygnal", "pydantic"]
+dependencies = ["qtpy", "superqt", "numpy", "psygnal", "pydantic>2", "pydantic-extra-types"]
 
 # https://peps.python.org/pep-0621/#dependencies-optional-dependencies
 # add dependencies for "extra" features here.  Not dev dependencies.
@@ -63,7 +63,7 @@ dev = [
     { include-group = "test" },
     "ipython",
     "pdbpp",  # https://github.com/pdbpp/pdbpp
-    "pre-commit-uv",
+    "prek",
     "rich",  # https://github.com/Textualize/rich
     "ruff",
 ]

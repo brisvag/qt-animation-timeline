@@ -23,11 +23,9 @@ from superqt import QSearchableComboBox
 
 from qt_animation_timeline.easing import EasingFunction
 from qt_animation_timeline.models import (
-    PLAY_LOOP,
-    PLAY_NORMAL,
-    PLAY_PINGPONG,
     Animation,
     Keyframe,
+    PlayMode,
     Track,
 )
 
@@ -65,9 +63,9 @@ _DEFAULT_COLORS: dict[str, QColor] = {
 }
 
 _PLAY_MODE_ICONS = {
-    PLAY_NORMAL: "play_once",
-    PLAY_LOOP: "loop",
-    PLAY_PINGPONG: "pingpong",
+    PlayMode.NORMAL: "play_once",
+    PlayMode.LOOP: "loop",
+    PlayMode.PINGPONG: "pingpong",
 }
 
 # SVG path data (Material Design, viewBox "0 0 24 24") for every button icon.
@@ -166,6 +164,7 @@ class AnimationTimelineWidget(QWidget):
         self._drag_pivot: Keyframe | None = None
         self._drag_offset: int = 0
         self._dragging_keyframes: bool = False
+        self._track_moved: bool = False
         self._scrubbing: bool = False
         self._box_start: QPoint | None = None
         self._box_rect: QRect | None = None
@@ -702,6 +701,7 @@ class AnimationTimelineWidget(QWidget):
             kf.t = max(0, kf.t + delta)
         self._dragging_track.keyframes.sort(key=lambda k: k.t)
         self._track_drag_x = x
+        self._track_moved = True
         self.update_scrollbars()
         self.update()
 
@@ -739,6 +739,7 @@ class AnimationTimelineWidget(QWidget):
         if self._dragging_track is not None:
             self.animation.notify_keyframes_moved(list(self._dragging_track.keyframes))
             self._dragging_track = None
+            self._track_moved = False
 
         if self._dragging_keyframes and self.selected_keyframes:
             self.animation.notify_keyframes_moved(list(self.selected_keyframes))

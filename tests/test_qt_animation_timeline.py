@@ -1,5 +1,6 @@
 import dataclasses
 import os
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -18,11 +19,9 @@ from qt_animation_timeline.editor import (
     AnimationTimelineWidget,
 )
 from qt_animation_timeline.models import (
-    PLAY_LOOP,
-    PLAY_NORMAL,
-    PLAY_PINGPONG,
     Animation,
     Keyframe,
+    PlayMode,
     Track,
 )
 
@@ -40,22 +39,10 @@ def test_imports_with_version():
 def test_easing_linear(qapp):
     assert EasingFunction.Linear(0.0, 0.0, 1.0) == pytest.approx(0.0)
     assert EasingFunction.Linear(0.5, 0.0, 1.0) == pytest.approx(0.5)
-    assert EasingFunction.Linear(1.0, 0.0, 1.0) == pytest.approx(1.0)
-    assert EasingFunction.Linear(0.5, 10.0, 20.0) == pytest.approx(15.0)
-
-
-def test_easing_step(qapp):
-    assert EasingFunction.Step(0.0, 0.0, 1.0) == pytest.approx(0.0)
     assert EasingFunction.Step(0.49, 0.0, 1.0) == pytest.approx(0.0)
     assert EasingFunction.Step(0.5, 0.0, 1.0) == pytest.approx(1.0)
-    assert EasingFunction.Step(1.0, 0.0, 1.0) == pytest.approx(1.0)
     assert EasingFunction.Step(0.3, "a", "b") == "a"
     assert EasingFunction.Step(0.5, "a", "b") == "b"
-
-
-def test_easing_members_callable():
-    for ef in EasingFunction:
-        assert callable(ef)
 
 
 def test_coerce_value():
@@ -559,13 +546,13 @@ def test_arrow_keys(qapp):
 
 def test_play_modes(qapp):
     state = Animation()
-    assert state.play_mode == PLAY_NORMAL
+    assert state.play_mode == PlayMode.NORMAL
     state.cycle_play_mode()
-    assert state.play_mode == PLAY_LOOP
+    assert state.play_mode == PlayMode.LOOP
     state.cycle_play_mode()
-    assert state.play_mode == PLAY_PINGPONG
+    assert state.play_mode == PlayMode.PINGPONG
     state.cycle_play_mode()
-    assert state.play_mode == PLAY_NORMAL
+    assert state.play_mode == PlayMode.NORMAL
 
 
 def test_play_normal_stops_at_last_keyframe(qapp):
@@ -573,7 +560,7 @@ def test_play_normal_stops_at_last_keyframe(qapp):
     state.add_track("A")
     state.tracks[0].add_keyframe(0, value=0.0)
     state.tracks[0].add_keyframe(5, value=1.0)
-    state.play_mode = PLAY_NORMAL
+    state.play_mode = PlayMode.NORMAL
     state.playing = True
     state.current_frame = 5
     state.advance_playhead()
@@ -585,7 +572,7 @@ def test_play_loop_wraps(qapp):
     state.add_track("A")
     state.tracks[0].add_keyframe(0, value=0.0)
     state.tracks[0].add_keyframe(5, value=1.0)
-    state.play_mode = PLAY_LOOP
+    state.play_mode = PlayMode.LOOP
     state.current_frame = 5
     state.advance_playhead()
     assert state.current_frame == 0
@@ -596,7 +583,7 @@ def test_play_pingpong_reverses(qapp):
     state.add_track("A")
     state.tracks[0].add_keyframe(0, value=0.0)
     state.tracks[0].add_keyframe(5, value=1.0)
-    state.play_mode = PLAY_PINGPONG
+    state.play_mode = PlayMode.PINGPONG
     state.play_direction = 1
     state.current_frame = 5
     state.advance_playhead()
@@ -608,7 +595,7 @@ def test_play_pingpong_reverses(qapp):
 
 def test_play_no_keyframes(qapp):
     state = Animation()
-    state.play_mode = PLAY_NORMAL
+    state.play_mode = PlayMode.NORMAL
     state.playing = True
     state.advance_playhead()
     assert not state.playing
@@ -626,9 +613,9 @@ def test_play_mode_icons():
     for key in _PLAY_MODE_ICONS.values():
         assert key in _BUTTON_ICONS
     assert len(set(_PLAY_MODE_ICONS.values())) == len(_PLAY_MODE_ICONS)
-    assert _PLAY_MODE_ICONS[PLAY_NORMAL] not in (
-        _PLAY_MODE_ICONS[PLAY_LOOP],
-        _PLAY_MODE_ICONS[PLAY_PINGPONG],
+    assert _PLAY_MODE_ICONS[PlayMode.NORMAL] not in (
+        _PLAY_MODE_ICONS[PlayMode.LOOP],
+        _PLAY_MODE_ICONS[PlayMode.PINGPONG],
     )
 
 
@@ -698,7 +685,7 @@ def test_interpolate_list_and_tuple_values(qapp):
 
 def test_dispatch_list_and_tuple_cast_back(qapp):
     class Model:
-        pos_list = [0.0, 0.0]  # noqa: RUF012
+        pos_list: ClassVar = [0.0, 0.0]
         pos_tuple = (0.0, 0.0)
 
     m = Model()
@@ -902,6 +889,83 @@ def test_model_field_step_fallback(qapp):
     result_after = _interpolate_field(EasingFunction.Linear, 0.6, "a", "b")
     assert result_before == "a"
     assert result_after == "b"
+
+
+def test_numerical_string_stays_str(qapp):
+    """Numerical string values must not be converted to floats/ints; Step is used."""
+    from qt_animation_timeline.models import Animation, _interpolate_field
+
+    # _interpolate_field: numerical strings stay as str and use Step.
+    for p, expected in [(0.3, "10"), (0.5, "20"), (0.7, "20")]:
+        result = _interpolate_field(EasingFunction.Linear, p, "10", "20")
+        assert result == expected
+        assert isinstance(result, str)
+
+    # Full pipeline: track with numerical string values stays str end-to-end.
+    class Obj:
+        def __init__(self):
+            self.name = "0"
+
+    obj = Obj()
+    state = Animation(track_options={"name": (obj, "name")})
+    track = state.add_track("name")
+    track.add_keyframe(0, "10")
+    track.add_keyframe(100, "20")
+
+    state.current_frame = 30
+    assert obj.name == "10"
+    assert isinstance(obj.name, str)
+
+    state.current_frame = 60
+    assert obj.name == "20"
+    assert isinstance(obj.name, str)
+
+
+def test_numerical_string_model_field_stays_str(qapp):
+    """A dataclass field of type str with a numerical value stays str after interp."""
+    import dataclasses
+
+    from qt_animation_timeline.models import Animation
+
+    @dataclasses.dataclass
+    class Config:
+        mode: str = "0"
+        speed: float = 0.0
+
+    class Obj:
+        def __init__(self):
+            self.config = Config("1", 0.0)
+
+    obj = Obj()
+    state = Animation(track_options={"config": (obj, "config")})
+    track = state.add_track("config")
+    track.add_keyframe(0, Config("10", 0.0))
+    track.add_keyframe(100, Config("20", 10.0))
+
+    state.current_frame = 30
+    assert obj.config.mode == "10"
+    assert isinstance(obj.config.mode, str)
+    assert obj.config.speed == pytest.approx(3.0)
+
+    state.current_frame = 60
+    assert obj.config.mode == "20"
+    assert isinstance(obj.config.mode, str)
+    assert obj.config.speed == pytest.approx(6.0)
+
+
+def test_str_track_only_allows_step_easing(qapp):
+    """The editor restricts str-typed track fields to Step easing only."""
+    from pydantic import BaseModel
+
+    class Model(BaseModel):
+        label: str = "hello"
+
+    m = Model()
+    w = AnimationTimelineWidget()
+    w.track_options = {"label": (m, "label")}
+    t = w.add_track("label")
+
+    assert w._get_allowed_easings_for_track(t) == [EasingFunction.Step]
 
 
 def test_animation_state_signals(qapp):

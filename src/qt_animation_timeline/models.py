@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
+from enum import Enum
 from typing import Any, ClassVar
 
 import numpy as np
@@ -14,15 +15,17 @@ from pydantic import ConfigDict, Field, field_validator
 
 from qt_animation_timeline.easing import EasingFunction, _coerce_value
 
-PLAY_NORMAL = 0
-PLAY_LOOP = 1
-PLAY_PINGPONG = 2
+
+class PlayMode(int, Enum):
+    NORMAL = 0
+    LOOP = 1
+    PINGPONG = 2
+
 
 _MISSING = object()
 
 
-def _is_model_instance(obj: Any) -> bool:
-    """Return ``True`` if *obj* is a pydantic model or dataclass instance."""
+def _is_model_or_dataclass(obj: Any) -> bool:
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return True
     return hasattr(obj, "model_dump") or (
@@ -30,10 +33,9 @@ def _is_model_instance(obj: Any) -> bool:
     )
 
 
-def _model_fields(obj: Any) -> dict[str, Any]:
-    """Return a ``{name: value}`` mapping for a dataclass, pydantic instance, or dict."""
+def _to_dict(obj: Any) -> dict[str, Any]:
     if isinstance(obj, dict):
-        return obj
+        return dict(obj)
     if hasattr(obj, "model_dump"):
         return obj.model_dump()
     if hasattr(obj, "dict") and hasattr(obj, "__fields__"):
@@ -43,20 +45,13 @@ def _model_fields(obj: Any) -> dict[str, Any]:
     return {}
 
 
-def _to_static_value(value: Any) -> Any:
-    """Convert a model/dataclass instance to a static dict copy.
-
-    Plain values (numbers, arrays, strings, dicts) are returned unchanged.
-    """
-    if _is_model_instance(value):
-        return _model_fields(value)
-    return value
-
-
 def _interpolate_field(easing: EasingFunction, p: float, v1: Any, v2: Any) -> Any:
     """Interpolate between *v1* and *v2* using *easing*, falling back to Step."""
     if easing is not EasingFunction.Linear:
         return easing(p, v1, v2)
+    # str values must never be cast to numbers; always use Step regardless of easing.
+    if isinstance(v1, str) or isinstance(v2, str):
+        return EasingFunction.Step(p, v1, v2)
     try:
         v1n = np.asarray(v1, dtype=float) if isinstance(v1, (list, tuple)) else v1
         v2n = np.asarray(v2, dtype=float) if isinstance(v2, (list, tuple)) else v2
@@ -68,9 +63,9 @@ def _interpolate_field(easing: EasingFunction, p: float, v1: Any, v2: Any) -> An
 def _interpolate_model(
     easing: EasingFunction, p: float, m1: Any, m2: Any
 ) -> dict[str, Any]:
-    """Return a dict of per-field interpolated values between two model instances or dicts."""
-    f1 = _model_fields(m1)
-    f2 = _model_fields(m2)
+    """Return a dict of per-field interpolated values between two models or dicts."""
+    f1 = _to_dict(m1)
+    f2 = _to_dict(m2)
     return {
         name: _interpolate_field(easing, p, f1[name], f2[name])
         for name in f1
@@ -79,8 +74,8 @@ def _interpolate_model(
 
 
 def _apply_model_value(target: Any, source: Any) -> None:
-    """Apply field values from *source* (dict or model instance) to *target* in-place."""
-    data = source if isinstance(source, dict) else _model_fields(source)
+    """Apply field values from *source* (dict or model) to *target* in-place."""
+    data = source if isinstance(source, dict) else _to_dict(source)
     if not data:
         return
 
@@ -95,8 +90,8 @@ def _apply_model_value(target: Any, source: Any) -> None:
         try:
             if (
                 existing is not _MISSING
-                and _is_model_instance(existing)
-                and _is_model_instance(val)
+                and _is_model_or_dataclass(existing)
+                and _is_model_or_dataclass(val)
             ):
                 _apply_model_value(existing, val)
             else:
@@ -158,8 +153,9 @@ class Keyframe(EventedModel):
         easing: EasingFunction = EasingFunction.Linear,
         **data: Any,
     ) -> None:
-        value = _to_static_value(value)
-        super().__init__(t=t, value=value, easing=easing, **data)
+        self.t = max(0, int(t))
+        self.value = _to_dict(value) if _is_model_or_dataclass(value) else value
+        self.easing = easing
 
 
 class Track(EventedModel):
@@ -226,7 +222,7 @@ class Animation(EventedModel):
 
     current_frame: int = 0
     playing: bool = False
-    play_mode: int = PLAY_NORMAL
+    play_mode: PlayMode = PlayMode.NORMAL
     play_direction: int = 1
     play_fps: int = 30
     playback_speed: float = 1.0
@@ -346,7 +342,7 @@ class Animation(EventedModel):
 
     def cycle_play_mode(self) -> None:
         """Cycle normal -> loop -> pingpong -> normal."""
-        self.play_mode = (self.play_mode + 1) % 3
+        self.play_mode = PlayMode((self.play_mode + 1) % 3)
         self.play_direction = 1
 
     def advance_playhead(self) -> None:
@@ -357,15 +353,15 @@ class Animation(EventedModel):
         tracks: EventedList = self.tracks  # type: ignore[attr-defined]
         max_frame = max((kf.t for t in tracks for kf in t.keyframes), default=0)
         next_frame = self.current_frame + self.play_direction
-        if self.play_mode == PLAY_NORMAL:
+        if self.play_mode == PlayMode.NORMAL:
             if next_frame > max_frame:
                 self.playing = False
                 self.current_frame = max_frame
                 return
-        elif self.play_mode == PLAY_LOOP:
+        elif self.play_mode == PlayMode.LOOP:
             if next_frame > max_frame:
                 next_frame = 0
-        elif self.play_mode == PLAY_PINGPONG:
+        elif self.play_mode == PlayMode.PINGPONG:
             if next_frame > max_frame:
                 self.play_direction = -1
                 next_frame = max(0, max_frame - 1)
@@ -406,8 +402,11 @@ class Animation(EventedModel):
                     return k2.value
                 p = (frame - k1.t) / span
                 v1, v2 = k1.value, k2.value
-                is_model = _is_model_instance(v1) or _is_model_instance(v2)
-                if is_model or (isinstance(v1, dict) and isinstance(v2, dict)):
+                if (
+                    _is_model_or_dataclass(v1)
+                    or _is_model_or_dataclass(v2)
+                    or (isinstance(v1, dict) and isinstance(v2, dict))
+                ):
                     return _interpolate_model(k1.easing, p, v1, v2)
                 if isinstance(v1, (list, tuple)) or isinstance(v2, (list, tuple)):
                     v1 = np.asarray(v1, dtype=float)
@@ -431,7 +430,7 @@ class Animation(EventedModel):
             if value is None:
                 continue
             reference = getattr(model, field)
-            if _is_model_instance(reference):
+            if _is_model_or_dataclass(reference):
                 _apply_model_value(reference, value)
             else:
                 setattr(model, field, _coerce_value(reference, value))
