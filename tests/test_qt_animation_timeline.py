@@ -886,6 +886,82 @@ def test_model_field_step_fallback(qapp):
     assert result_after == "b"
 
 
+def test_numerical_string_stays_str(qapp):
+    """Numerical string values must not be converted to floats/ints; Step is used."""
+    from qt_animation_timeline.models import _interpolate_field, Animation
+
+    # _interpolate_field: numerical strings stay as str and use Step.
+    for p, expected in [(0.3, "10"), (0.5, "20"), (0.7, "20")]:
+        result = _interpolate_field(EasingFunction.Linear, p, "10", "20")
+        assert result == expected
+        assert isinstance(result, str)
+
+    # Full pipeline: track with numerical string values stays str end-to-end.
+    class Obj:
+        def __init__(self):
+            self.name = "0"
+
+    obj = Obj()
+    state = Animation(track_options={"name": (obj, "name")})
+    track = state.add_track("name")
+    track.add_keyframe(0, "10")
+    track.add_keyframe(100, "20")
+
+    state.current_frame = 30
+    assert obj.name == "10"
+    assert isinstance(obj.name, str)
+
+    state.current_frame = 60
+    assert obj.name == "20"
+    assert isinstance(obj.name, str)
+
+
+def test_numerical_string_model_field_stays_str(qapp):
+    """A dataclass field of type str with a numerical value stays str after interpolation."""
+    import dataclasses
+    from qt_animation_timeline.models import Animation
+
+    @dataclasses.dataclass
+    class Config:
+        mode: str = "0"
+        speed: float = 0.0
+
+    class Obj:
+        def __init__(self):
+            self.config = Config("1", 0.0)
+
+    obj = Obj()
+    state = Animation(track_options={"config": (obj, "config")})
+    track = state.add_track("config")
+    track.add_keyframe(0, Config("10", 0.0))
+    track.add_keyframe(100, Config("20", 10.0))
+
+    state.current_frame = 30
+    assert obj.config.mode == "10"
+    assert isinstance(obj.config.mode, str)
+    assert obj.config.speed == pytest.approx(3.0)
+
+    state.current_frame = 60
+    assert obj.config.mode == "20"
+    assert isinstance(obj.config.mode, str)
+    assert obj.config.speed == pytest.approx(6.0)
+
+
+def test_str_track_only_allows_step_easing(qapp):
+    """The editor restricts str-typed track fields to Step easing only."""
+    from pydantic import BaseModel
+
+    class Model(BaseModel):
+        label: str = "hello"
+
+    m = Model()
+    w = AnimationTimelineWidget()
+    w.track_options = {"label": (m, "label")}
+    t = w.add_track("label")
+
+    assert w._get_allowed_easings_for_track(t) == [EasingFunction.Step]
+
+
 def test_animation_state_signals(qapp):
     """Animation emits psygnal signals with no Qt dependency in signal logic."""
     state = Animation(track_options={"A": (object(), "x")})

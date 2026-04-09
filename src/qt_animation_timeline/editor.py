@@ -831,7 +831,7 @@ class AnimationTimelineWidget(QWidget):
             value = getattr(model, field)
         except AttributeError:
             return self.easing_options
-        if isinstance(value, bool):
+        if isinstance(value, (bool, str)):
             return [ef for ef in self.easing_options if ef is EasingFunction.Step]
         return self.easing_options
 
