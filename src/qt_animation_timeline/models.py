@@ -147,6 +147,9 @@ class Animation(EventedModel):
     play_direction: Literal[-1, 1] = 1
     play_fps: Annotated[int, Field(gt=0)] = 30
 
+    track_added: ClassVar[Signal] = Signal(object)
+    track_removed: ClassVar[Signal] = Signal(object)
+    track_renamed: ClassVar[Signal] = Signal(object)
     keyframes_added: ClassVar[Signal] = Signal(list)
     keyframes_removed: ClassVar[Signal] = Signal(list)
     keyframes_moved: ClassVar[Signal] = Signal(list)
@@ -176,6 +179,7 @@ class Animation(EventedModel):
             raise KeyError(f"Track {name} already exists.")
         track = Track(name=name, color=color or Color((180, 180, 180)))
         self.tracks.append(track)
+        self.track_added(track)
         return track
 
     def remove_track(self, name: str) -> None:
@@ -184,6 +188,7 @@ class Animation(EventedModel):
         if track is None:
             raise KeyError(f"Track {name} does not exist.")
         self.tracks.remove(track)
+        self.track_removed(track)
 
     def rename_track(self, old_name: str, new_name: str) -> None:
         """Rename a track option key and any existing track with that name."""
@@ -195,6 +200,7 @@ class Animation(EventedModel):
         track = self.get_track(old_name)
         if track is not None:
             track.name = new_name
+        self.track_renamed(track)
 
     def add_keyframe(
         self,

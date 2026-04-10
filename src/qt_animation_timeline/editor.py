@@ -176,55 +176,33 @@ class AnimationTimelineWidget(QWidget):
         self.font_size: int = font_size
         self.label_font = QFont("Arial", font_size)
 
-        self.animation.events.current_frame.connect(self._on_frame_changed)
+        self.animation.events.current_frame.connect(self._bare_update)
         self.animation.events.playing.connect(self._on_playing_changed)
-        self.animation.tracks.events.inserted.connect(self._on_track_added)
-        self.animation.tracks.events.removed.connect(self._on_track_removed)
-        self.animation.tracks.events.child_event.connect(self._on_track_child_event)
-        self.animation.keyframes_added.connect(self._on_keyframe_added)
-        self.animation.keyframes_removed.connect(self._on_keyframes_removed)
-        self.animation.keyframes_moved.connect(self._on_keyframes_moved)
-        self.animation.easing_changed.connect(self._on_easing_changed)
+        self.animation.track_added.connect(self._update_geometry)
+        self.animation.track_removed.connect(self._on_track_removed)
+        self.animation.track_renamed.connect(self._update_geometry)
+        self.animation.keyframes_added.connect(self._update_geometry)
+        self.animation.keyframes_removed.connect(self._update_geometry)
+        self.animation.keyframes_moved.connect(self._update_geometry)
+        self.animation.easing_changed.connect(self._bare_update)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
 
-    def _on_frame_changed(self, frame: int) -> None:
-        self.update()
-
-    def _on_track_added(self, index: int, track: Track) -> None:
-        self.updateGeometry()
-        self.update_scrollbars()
-        self.update()
-
-    def _on_track_removed(self, index: int, track: Track) -> None:
+    def _on_track_removed(self, track: Track) -> None:
         removed_ids = {id(kf) for kf in track.keyframes}
         self.selected_keyframes = [
             kf for kf in self.selected_keyframes if id(kf) not in removed_ids
         ]
+        self._update_geometry()
+
+    def _update_geometry(self) -> None:
         self.updateGeometry()
         self.update_scrollbars()
         self.update()
 
-    def _on_track_child_event(self, info: object) -> None:
-        self.update()
-
-    def _on_keyframe_added(self, keyframes: list[Keyframe]) -> None:
-        self.updateGeometry()
-        self.update_scrollbars()
-        self.update()
-
-    def _on_keyframes_removed(self, keyframes: list[Keyframe]) -> None:
-        self.updateGeometry()
-        self.update_scrollbars()
-        self.update()
-
-    def _on_keyframes_moved(self, keyframes: list[Keyframe]) -> None:
-        self.updateGeometry()
-        self.update_scrollbars()
-        self.update()
-
-    def _on_easing_changed(self, keyframes: list[Keyframe]) -> None:
+    def _bare_update(self):
+        # needed for signals not to pass wrong arguments to qt update
         self.update()
 
     def _on_playing_changed(self, playing: bool) -> None:
@@ -285,9 +263,6 @@ class AnimationTimelineWidget(QWidget):
             - self.scroll_y
             + self.track_height / 2
         )
-
-    # ------------------------------------------------------------------
-    # Scrollbars / resize
 
     def resizeEvent(self, event) -> None:
         vsw = 20 if self.v_scroll.isVisible() else 0
@@ -362,9 +337,6 @@ class AnimationTimelineWidget(QWidget):
         else:
             step = magnitude
         return max(1, int(step))
-
-    # ------------------------------------------------------------------
-    # Painting
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -549,9 +521,6 @@ class AnimationTimelineWidget(QWidget):
             QPoint(int(x - s), int(y)),
         ]
         painter.drawPolygon(pts)
-
-    # ------------------------------------------------------------------
-    # Mouse events
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
@@ -981,9 +950,6 @@ class AnimationTimelineWidget(QWidget):
         if combo.lineEdit() is not None:
             combo.lineEdit().returnPressed.connect(_add_from_enter)
 
-    # ------------------------------------------------------------------
-    # Zoom / scroll
-
     def _scroll_x_for_zoom(self, mouse_x: int, old_fw: float, new_fw: float) -> int:
         """Compute the ``scroll_x`` that keeps the frame under *mouse_x* fixed."""
         frame_at_mouse = (
@@ -1034,9 +1000,6 @@ class AnimationTimelineWidget(QWidget):
         elif event.key() == Qt.Key.Key_Right:
             self._set_playhead(self.animation.current_frame + 1)
 
-    # ------------------------------------------------------------------
-    # Playback
-
     def _toggle_playback(self) -> None:
         self.animation.playing = not self.animation.playing
 
@@ -1071,18 +1034,6 @@ class AnimationTimelineWidget(QWidget):
     def _set_playhead(self, frame: int) -> None:
         """Move the playhead to *frame*."""
         self.animation.current_frame = frame
-
-    # ------------------------------------------------------------------
-    # Track management helpers
-
-    @property
-    def track_options(self) -> dict:
-        """Delegate to ``animation.track_options``."""
-        return self.animation.track_options
-
-    @track_options.setter
-    def track_options(self, value: dict) -> None:
-        self.animation.track_options = value
 
     def _can_add_track(self) -> bool:
         return len(self.animation.tracks) < len(self.animation.track_options)
