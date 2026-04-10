@@ -6,7 +6,7 @@ import itertools
 import math
 from typing import Any
 
-from qtpy.QtCore import QByteArray, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
+from qtpy.QtCore import QByteArray, QPoint, QRect, QRectF, QSize, Qt, QTimer
 from qtpy.QtGui import (
     QColor,
     QFont,
@@ -75,7 +75,7 @@ _BUTTON_ICONS: dict[str, str] = {
     "pause": "M6 19h4V5H6v14zm8-14v14h4V5h-4z",
     "play_once": "M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z",
     "loop": "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v5z",
-    "pingpong": "M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z",
+    "pingpong": "M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z",  # noqa: E501
     "plus": "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z",
     "minus": "M19 13H5v-2h14v2z",
 }
@@ -114,15 +114,6 @@ class AnimationTimelineWidget(QWidget):
     and controllable programmatically through ``widget.animation``.
     """
 
-    playhead_moved = Signal(int)
-    track_added = Signal(object)
-    track_removed = Signal(object)
-    track_changed = Signal(object)
-    keyframe_added = Signal(object, object)
-    keyframes_removed = Signal(list)
-    keyframes_moved = Signal(list)
-    easing_changed = Signal(list)
-
     def __init__(
         self,
         parent: QWidget | None = None,
@@ -130,7 +121,7 @@ class AnimationTimelineWidget(QWidget):
         font_size: int = 10,
         track_color_cycle: list[QColor] | None = None,
         track_options: dict[str, tuple[Any, str]] | None = None,
-        playback_speed: float = 1.0,
+        play_fps: int = 30,
         **color_kwargs: QColor,
     ) -> None:
         super().__init__(parent)
@@ -155,9 +146,9 @@ class AnimationTimelineWidget(QWidget):
             else list(_DEFAULT_TRACK_COLORS)
         )
 
-        self.animation = Animation(
-            playback_speed=playback_speed,
+        self.animation: Animation = Animation(
             track_options=track_options if track_options is not None else {},
+            play_fps=play_fps,
         )
 
         self.selected_keyframes: list[Keyframe] = []
@@ -185,28 +176,26 @@ class AnimationTimelineWidget(QWidget):
         self.font_size: int = font_size
         self.label_font = QFont("Arial", font_size)
 
-        self.animation.events.current_frame.connect(self._on_state_frame_changed)
-        self.animation.events.playing.connect(self._on_state_playing_changed)
+        self.animation.events.current_frame.connect(self._on_frame_changed)
+        self.animation.events.playing.connect(self._on_playing_changed)
         self.animation.tracks.events.inserted.connect(self._on_track_added)
         self.animation.tracks.events.removed.connect(self._on_track_removed)
         self.animation.tracks.events.child_event.connect(self._on_track_child_event)
-        self.animation.keyframe_added.connect(self._on_state_keyframe_added)
-        self.animation.keyframes_removed.connect(self._on_state_keyframes_removed)
-        self.animation.keyframes_moved.connect(self._on_state_keyframes_moved)
-        self.animation.easing_changed.connect(self._on_state_easing_changed)
+        self.animation.keyframes_added.connect(self._on_keyframe_added)
+        self.animation.keyframes_removed.connect(self._on_keyframes_removed)
+        self.animation.keyframes_moved.connect(self._on_keyframes_moved)
+        self.animation.easing_changed.connect(self._on_easing_changed)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
 
-    def _on_state_frame_changed(self, frame: int) -> None:
+    def _on_frame_changed(self, frame: int) -> None:
         self.update()
-        self.playhead_moved.emit(frame)
 
     def _on_track_added(self, index: int, track: Track) -> None:
         self.updateGeometry()
         self.update_scrollbars()
         self.update()
-        self.track_added.emit(track)
 
     def _on_track_removed(self, index: int, track: Track) -> None:
         removed_ids = {id(kf) for kf in track.keyframes}
@@ -216,7 +205,6 @@ class AnimationTimelineWidget(QWidget):
         self.updateGeometry()
         self.update_scrollbars()
         self.update()
-        self.track_removed.emit(track)
 
     def _on_track_child_event(self, info: object) -> None:
         self.update()
@@ -227,33 +215,30 @@ class AnimationTimelineWidget(QWidget):
                 if 0 <= idx < len(self.animation.tracks):
                     self.track_changed.emit(self.animation.tracks[idx])
 
-    def _on_state_keyframe_added(self, track: Track, kf: Keyframe) -> None:
+    def _on_keyframe_added(self) -> None:
         self.updateGeometry()
         self.update_scrollbars()
         self.update()
-        self.keyframe_added.emit(track, kf)
 
-    def _on_state_keyframes_removed(self, keyframes: list[Keyframe]) -> None:
+    def _on_keyframes_removed(self, keyframes: list[Keyframe]) -> None:
         self.updateGeometry()
         self.update_scrollbars()
         self.update()
         self.keyframes_removed.emit(keyframes)
 
-    def _on_state_keyframes_moved(self, keyframes: list[Keyframe]) -> None:
+    def _on_keyframes_moved(self, keyframes: list[Keyframe]) -> None:
         self.updateGeometry()
         self.update_scrollbars()
         self.update()
         self.keyframes_moved.emit(keyframes)
 
-    def _on_state_easing_changed(self, keyframes: list[Keyframe]) -> None:
+    def _on_easing_changed(self, keyframes: list[Keyframe]) -> None:
         self.update()
         self.easing_changed.emit(keyframes)
 
-    def _on_state_playing_changed(self, playing: bool) -> None:
+    def _on_playing_changed(self, playing: bool) -> None:
         if playing:
-            interval = max(
-                1, int(1000 / (self.animation.play_fps * self.animation.playback_speed))
-            )
+            interval = max(1, int(1000 / (self.animation.play_fps)))
             self._play_timer.start(interval)
         else:
             self._play_timer.stop()
@@ -472,7 +457,7 @@ class AnimationTimelineWidget(QWidget):
             y = self.top_margin + i * self.track_height - self.scroll_y
             if y < -self.track_height or y > self.height():
                 continue
-            painter.setPen(QColor(*track.color))
+            painter.setPen(QColor(*track.color.as_rgb_tuple()))
             painter.drawText(
                 40,
                 y + self.track_height // 2 + metrics.ascent() // 2,
@@ -494,7 +479,7 @@ class AnimationTimelineWidget(QWidget):
             + len(self.animation.tracks) * self.track_height
             - self.scroll_y
         )
-        can_add = self.animation._can_add_track()
+        can_add = self._can_add_track()
         color = self.add_button_color if can_add else QColor(60, 60, 60)
         painter.setBrush(color)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -537,7 +522,7 @@ class AnimationTimelineWidget(QWidget):
     def draw_track(self, painter: QPainter, index: int, track: Track) -> None:
         """Draw the connecting line and all keyframes for *track*."""
         cy = int(self.track_center_y(index))
-        track_color = QColor(*track.color)
+        track_color = QColor(*track.color.as_rgb_tuple())
 
         if len(track.keyframes) >= 2:
             painter.setPen(QPen(track_color, self.line_thickness))
@@ -559,7 +544,7 @@ class AnimationTimelineWidget(QWidget):
         x = self.frame_to_x(kf.t)
         y = self.track_center_y(track_index)
         selected = kf in self.selected_keyframes
-        painter.setBrush(QColor(*track.color))
+        painter.setBrush(QColor(*track.color.as_rgb_tuple()))
         if selected:
             painter.setPen(QPen(self.keyframe_selected_border_color, 2))
         else:
@@ -641,7 +626,7 @@ class AnimationTimelineWidget(QWidget):
             + len(self.animation.tracks) * self.track_height
             - self.scroll_y
         )
-        if ay <= y <= ay + self.track_height and self.animation._can_add_track():
+        if ay <= y <= ay + self.track_height and self._can_add_track():
             self._show_add_track_popup(global_pos)
 
     def _start_keyframe_drag(self, event: QMouseEvent, kf: Keyframe, x: int) -> None:
@@ -1102,7 +1087,7 @@ class AnimationTimelineWidget(QWidget):
         self.animation.track_options = value
 
     def _can_add_track(self) -> bool:
-        return self.animation._can_add_track()
+        return len(self.animation.tracks) < len(self.animation.track_options)
 
     def add_track(self, name: str, color: tuple[int, int, int] | None = None) -> Track:
         """Add a new track with an auto-assigned colour and return it."""

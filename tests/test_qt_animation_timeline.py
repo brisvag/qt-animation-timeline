@@ -986,7 +986,7 @@ def test_state_keyframe_signals(qapp):
     track = state.add_track("A")
 
     kf_events = []
-    state.keyframe_added.connect(lambda t, kf: kf_events.append((t, kf)))
+    state.keyframes_added.connect(lambda t, kf: kf_events.append((t, kf)))
     kf = state.add_keyframe(track, 10, value=5.0)
     assert len(kf_events) == 1 and kf_events[0] == (track, kf)
 

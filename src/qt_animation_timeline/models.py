@@ -11,7 +11,7 @@ from typing import Annotated, Any, ClassVar, Literal
 from psygnal import Signal
 from psygnal._evented_model import EventedModel
 from psygnal.containers import EventedList, EventedSet
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_extra_types.color import Color
 
 from qt_animation_timeline.easing import EasingFunction, _is_model_or_dataclass
@@ -65,7 +65,7 @@ def _update_model_inplace(target: Any, data: dict) -> None:
             pass
 
 
-class Keyframe(EventedModel):
+class Keyframe(BaseModel):
     """A keyframe: time position, value, and easing for the segment after it."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
@@ -77,6 +77,9 @@ class Keyframe(EventedModel):
     @field_validator("value", mode="before")
     @classmethod
     def _models2dict(cls, value):
+        # this is crucial to store just the values of the model
+        # and not the model itself. Interpolation will then work
+        # without updating the original model.
         if _is_model_or_dataclass(value):
             return _to_dict(value)
         return value
@@ -86,7 +89,7 @@ class Keyframe(EventedModel):
         return hash((Keyframe, self.t))
 
 
-class Track(EventedModel):
+class Track(BaseModel):
     """A named, colored animation track holding a set of keyframes."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
@@ -113,7 +116,7 @@ class Track(EventedModel):
     def remove_keyframe(
         self,
         kf_or_t: Keyframe | int,
-    ) -> None:
+    ) -> Keyframe:
         if isinstance(kf_or_t, int):
             t = kf_or_t
             for kf in self.keyframes:
@@ -124,6 +127,7 @@ class Track(EventedModel):
         else:
             kf = kf_or_t
         self.keyframes.remove(kf)
+        return kf
 
     def sorted(self) -> list[Keyframe]:
         return sorted(self.keyframes, key=lambda kf: kf.t)
@@ -143,7 +147,7 @@ class Animation(EventedModel):
     play_direction: Literal[-1, 1] = 1
     play_fps: Annotated[int, Field(gt=0)] = 30
 
-    keyframe_added: ClassVar[Signal] = Signal(object, object)
+    keyframes_added: ClassVar[Signal] = Signal(list)
     keyframes_removed: ClassVar[Signal] = Signal(list)
     keyframes_moved: ClassVar[Signal] = Signal(list)
     easing_changed: ClassVar[Signal] = Signal(list)
@@ -204,7 +208,7 @@ class Animation(EventedModel):
         if track is None:
             raise KeyError(f"Track {track_name} does not exist.")
         kf = track.add_keyframe(t, value, easing)
-        self.keyframe_added.emit(track, kf)
+        self.keyframes_added([kf])
         self._update_bound_models()
         return kf
 
@@ -212,13 +216,44 @@ class Animation(EventedModel):
         self,
         track_name: str,
         t: int,
-    ) -> None:
+    ) -> Keyframe:
         track = self.get_track(track_name)
         if track is None:
             raise KeyError(f"Track {track_name} does not exist.")
         kf = track.remove_keyframe(t)
+        self.keyframes_removed([kf])
         self._update_bound_models()
         return kf
+
+    def remove_keyframes(
+        self,
+        keyframes: list[Keyframe],
+    ) -> None:
+        """Bulk removal of keyframes."""
+        for kf in keyframes:
+            for track in self.tracks:
+                if kf in track:
+                    track.remove_keyframe(kf)
+                    break
+            raise KeyError(f"Keyframe {kf} is not part of any track.")
+        self.keyframes_removed(keyframes)
+        self._update_bound_models()
+
+    def move_keyframes(
+        self,
+        keyframes: list[Keyframe],
+        offset: int,
+    ) -> None:
+        """Bulk removal of keyframes."""
+        for kf in keyframes:
+            for track in self.tracks:
+                if kf in track:
+                    break
+            raise KeyError(f"Keyframe {kf} is not part of any track.")
+        for kf in keyframes:
+            kf.t += offset
+        self.keyframes_moved(keyframes)
+        self._update_bound_models()
 
     def cycle_play_mode(self) -> None:
         """Cycle normal -> loop -> pingpong -> normal."""
