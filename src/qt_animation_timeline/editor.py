@@ -817,9 +817,18 @@ class AnimationTimelineWidget(QWidget):
         return EasingFunction.get_allowed_easings(value)
 
     def _is_on_track_line(self, x: int, y: int) -> bool:
-        """Return ``True`` if *(x, y)* is near a track's horizontal centre line."""
+        """Return ``True`` if *(x, y)* is near an existing track line."""
         track_index = self.y_to_track_index(y)
         if not (0 <= track_index < len(self.animation.tracks)):
+            return False
+        # do not grab if outside if before or after the last keyframe
+        track_frames = self.animation.tracks[track_index].sorted()
+        frame = self.x_to_frame(x)
+        if (
+            len(track_frames) < 2
+            or frame < track_frames[0].t
+            or frame > track_frames[-1].t
+        ):
             return False
         cy = self.track_center_y(track_index)
         return abs(y - cy) <= self.line_thickness + 4
@@ -937,9 +946,7 @@ class AnimationTimelineWidget(QWidget):
         matching (highlighted) item.
         """
         used = {t.name for t in self.animation.tracks}
-        available = [
-            name for name in self.animation.track_options if name not in used
-        ]
+        available = [name for name in self.animation.track_options if name not in used]
         if not available:
             return
 
