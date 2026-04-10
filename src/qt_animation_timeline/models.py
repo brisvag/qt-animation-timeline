@@ -113,17 +113,19 @@ class Track(BaseModel):
         self.keyframes.add(kf)
         return kf
 
+    def _get_kf(self, t: int) -> Keyframe:
+        for kf in self.keyframes:
+            if kf.t == t:
+                return kf
+        else:
+            raise KeyError(f"keyframe at frame {t} does not exist")
+
     def remove_keyframe(
         self,
         kf_or_t: Keyframe | int,
     ) -> Keyframe:
         if isinstance(kf_or_t, int):
-            t = kf_or_t
-            for kf in self.keyframes:
-                if kf.t == t:
-                    break
-            else:
-                raise KeyError(f"keyframe at frame {t} does not exist")
+            kf = self._get_kf(kf_or_t)
         else:
             kf = kf_or_t
         self.keyframes.remove(kf)
