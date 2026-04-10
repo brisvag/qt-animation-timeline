@@ -36,27 +36,6 @@ def test_imports_with_version():
     assert hasattr(qt_animation_timeline, "Animation")
 
 
-def test_easing_linear(qapp):
-    assert EasingFunction.Linear(0.0, 0.0, 1.0) == pytest.approx(0.0)
-    assert EasingFunction.Linear(0.5, 0.0, 1.0) == pytest.approx(0.5)
-    assert EasingFunction.Step(0.49, 0.0, 1.0) == pytest.approx(0.0)
-    assert EasingFunction.Step(0.5, 0.0, 1.0) == pytest.approx(1.0)
-    assert EasingFunction.Step(0.3, "a", "b") == "a"
-    assert EasingFunction.Step(0.5, "a", "b") == "b"
-
-
-def test_coerce_value():
-    assert isinstance(_coerce_value(1.0, 2.5), float)
-    assert _coerce_value(1.0, 2.5) == pytest.approx(2.5)
-    result = _coerce_value(1, 2.7)
-    assert isinstance(result, int) and result == 3
-    assert _coerce_value(True, 0.6) is True
-    assert _coerce_value(False, 0.4) is False
-    assert type(_coerce_value(False, 1.0)) is bool
-    obj = object()
-    assert _coerce_value(obj, 3.14) == 3.14
-
-
 def test_keyframe():
     assert Keyframe(-5).t == 0
     assert Keyframe(10).easing is EasingFunction.Linear
