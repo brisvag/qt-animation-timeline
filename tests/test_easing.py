@@ -19,6 +19,7 @@ from qt_animation_timeline.easing import EasingFunction
             {"a": -0.7, "b": True},
         ),
         ([1, [2, 3]], [3, [4, 5]], 0.5, EasingFunction.Linear, [2, [3, 4]]),
+        (("0", "1"), ("2", "3"), 0.4, EasingFunction.Linear, ("0", "1")),
         (
             np.arange(10),
             np.arange(10, 20),

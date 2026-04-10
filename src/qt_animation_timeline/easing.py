@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import warnings
+from collections.abc import Iterable
 from enum import Enum
 from math import cos, pi, pow, sin, sqrt
 from types import NoneType
@@ -242,6 +243,19 @@ def _is_model_or_dataclass(obj: Any) -> bool:
     )
 
 
+def _is_collection(obj: Any) -> bool:
+    # exclude stuff like strings and numpy arrays which are handled differently
+    return (
+        isinstance(obj, Iterable)
+        and not np.isscalar(obj)
+        and not isinstance(obj, np.ndarray)
+    )
+
+
+def _is_numeric_array(arr: np.ndarray) -> bool:
+    return arr.dtype.kind in "iufcmM"
+
+
 def _coerce_value(reference: Any, interpolated: Any) -> Any:
     """Coerce *interpolated* to match the type of *reference*.
 
@@ -260,14 +274,13 @@ def _coerce_value(reference: Any, interpolated: Any) -> Any:
         return round(interpolated)
     if isinstance(reference, dict):
         # assume at this point dicts have the same set of keys
-        print(reference, interpolated)
         return {
             k: _coerce_value(vref, vint)
             for (k, vref), (_, vint) in zip(
                 reference.items(), interpolated.items(), strict=True
             )
         }
-    if not np.isscalar(reference) and not isinstance(reference, np.ndarray):
+    if _is_collection(reference):
         # cast each element back recursively (handles nested)
         return type(reference)(
             [_coerce_value(r, v) for r, v in zip(reference, interpolated, strict=True)]
@@ -344,10 +357,12 @@ class EasingFunction(Enum):
         # try catch all to have always the step fallback
         try:
             # collections should be treated as arrays if possible
-            if not np.isscalar(v1) or not np.isscalar(v2):
+            if _is_collection(v1) or _is_collection(v2):
                 try:
                     v1_arr = np.asarray(v1)
                     v2_arr = np.asarray(v2)
+                    if not _is_numeric_array(v1_arr):
+                        raise ValueError
                 except ValueError:
                     # may happen if it's not a homogeneous shape. Some other cases?
                     # So in this case go nested by element
@@ -365,4 +380,4 @@ class EasingFunction(Enum):
                 f"could not interpolate between {v1} and {v2}. Falling back to Step.",
                 stacklevel=2,
             )
-            return EasingFunction.Step.value[0]
+            return EasingFunction.Step.value[0](p, v1, v2)
