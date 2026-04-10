@@ -16,12 +16,13 @@ The widget is designed to work with dataclass/pydantic style models directly.
 
 ```py
 from pydantic import BaseModel
+from qt_animation_timeline import AnimationTimelineWidget
 
 class Circle(BaseModel):
     color: tuple[int, int, int] = (255, 0, 0)
     size: float = 10
     filled: bool = True
-    other_stuff = ...
+    other_stuff: str = "thing"
 
 circle = Circle()
 
@@ -31,6 +32,7 @@ track_options = {
 }
 
 timeline = AnimationTimelineWidget(track_options=track_options)
+timeline.show()
 ```
 
 This will allow to animate the color and size, updating the model accordingly when the playhead scrubs along the animation.
@@ -41,8 +43,8 @@ Note that this also works for nested models whenever possible:
 
 ```py
 class CircleSet(BaseModel):
-    circle1: Circle()
-    circle2: Circle()
+    circle1: Circle = Circle()
+    circle2: Circle = Circle()
 
 circleset = CircleSet()
 
@@ -50,6 +52,8 @@ track_options = {
     'circle 1': (circleset, 'circle1'),
     'circle 2': (circleset, 'circle2')
 }
+timeline = AnimationTimelineWidget(track_options=track_options)
+timeline.show()
 ```
 
 In this case, the whole model is considered the keyframe value, and all its elements will be interpolated.
