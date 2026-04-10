@@ -208,14 +208,8 @@ class AnimationTimelineWidget(QWidget):
 
     def _on_track_child_event(self, info: object) -> None:
         self.update()
-        if getattr(info, "signal", None) is not None and info.signal.name == "name":  # type: ignore[union-attr]
-            path = getattr(info, "path", ())
-            if path:
-                idx = path[0][0]
-                if 0 <= idx < len(self.animation.tracks):
-                    self.track_changed.emit(self.animation.tracks[idx])
 
-    def _on_keyframe_added(self) -> None:
+    def _on_keyframe_added(self, keyframes: list[Keyframe]) -> None:
         self.updateGeometry()
         self.update_scrollbars()
         self.update()
@@ -224,17 +218,14 @@ class AnimationTimelineWidget(QWidget):
         self.updateGeometry()
         self.update_scrollbars()
         self.update()
-        self.keyframes_removed.emit(keyframes)
 
     def _on_keyframes_moved(self, keyframes: list[Keyframe]) -> None:
         self.updateGeometry()
         self.update_scrollbars()
         self.update()
-        self.keyframes_moved.emit(keyframes)
 
     def _on_easing_changed(self, keyframes: list[Keyframe]) -> None:
         self.update()
-        self.easing_changed.emit(keyframes)
 
     def _on_playing_changed(self, playing: bool) -> None:
         if playing:
@@ -523,10 +514,11 @@ class AnimationTimelineWidget(QWidget):
         """Draw the connecting line and all keyframes for *track*."""
         cy = int(self.track_center_y(index))
         track_color = QColor(*track.color.as_rgb_tuple())
+        kfs = track.sorted()
 
-        if len(track.keyframes) >= 2:
+        if len(kfs) >= 2:
             painter.setPen(QPen(track_color, self.line_thickness))
-            for k1, k2 in itertools.pairwise(track.keyframes):
+            for k1, k2 in itertools.pairwise(kfs):
                 painter.drawLine(
                     int(self.frame_to_x(k1.t)),
                     cy,
@@ -534,7 +526,7 @@ class AnimationTimelineWidget(QWidget):
                     cy,
                 )
 
-        for kf in track.keyframes:
+        for kf in kfs:
             self.draw_keyframe(painter, index, track, kf)
 
     def draw_keyframe(
@@ -618,7 +610,7 @@ class AnimationTimelineWidget(QWidget):
             by = ty + (self.track_height - btn_size) // 2
             if 8 <= x <= 8 + btn_size and by <= y <= by + btn_size:
                 track = self.animation.tracks[i]
-                self.animation.remove_track(track)
+                self.animation.remove_track(track.name)
                 return
 
         ay = (
@@ -684,7 +676,6 @@ class AnimationTimelineWidget(QWidget):
             return
         for kf in self._dragging_track.keyframes:
             kf.t = max(0, kf.t + delta)
-        self._dragging_track.keyframes.sort(key=lambda k: k.t)
         self._track_drag_x = x
         self._track_moved = True
         self.update_scrollbars()
@@ -698,8 +689,6 @@ class AnimationTimelineWidget(QWidget):
             return
         for kf in self.selected_keyframes:
             kf.t = max(0, kf.t + delta)
-        for track in self.animation.tracks:
-            track.keyframes.sort(key=lambda k: k.t)
         self.update_scrollbars()
         self.update()
 
@@ -722,12 +711,15 @@ class AnimationTimelineWidget(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if self._dragging_track is not None:
-            self.animation.notify_keyframes_moved(list(self._dragging_track.keyframes))
+            if self._track_moved:
+                self.animation.keyframes_moved(list(self._dragging_track.keyframes))
+                self.animation._update_bound_models()
             self._dragging_track = None
             self._track_moved = False
 
         if self._dragging_keyframes and self.selected_keyframes:
-            self.animation.notify_keyframes_moved(list(self.selected_keyframes))
+            self.animation.keyframes_moved(list(self.selected_keyframes))
+            self.animation._update_bound_models()
 
         self._scrubbing = False
         self._drag_pivot = None
@@ -761,7 +753,7 @@ class AnimationTimelineWidget(QWidget):
         initial_value = getattr(binding[0], binding[1]) if binding is not None else 0
 
         try:
-            self.animation.add_keyframe(track, frame, value=initial_value)
+            self.animation.add_keyframe(track.name, frame, value=initial_value)
         except KeyError:
             return
 
@@ -797,7 +789,7 @@ class AnimationTimelineWidget(QWidget):
         if not (0 <= track_index < len(self.animation.tracks)):
             return None
         track = self.animation.tracks[track_index]
-        kfs = track.keyframes
+        kfs = track.sorted()
         if not kfs:
             return None
         frame = self.x_to_frame(x)
@@ -809,24 +801,20 @@ class AnimationTimelineWidget(QWidget):
         return None
 
     def _get_allowed_easings_for_track(self, track: Track) -> list[EasingFunction]:
-        """Return the subset of ``easing_options`` appropriate for *track*'s type.
+        """Return the subset of easing functions appropriate for *track*'s type.
 
         For ``str`` and ``bool`` fields only ``Step`` is offered since linear
         interpolation of those types produces invalid intermediates.
         """
         binding = self.animation.track_options.get(track.name)
         if binding is None:
-            return self.animation.easing_options
+            return list(EasingFunction)
         model, field = binding
         try:
             value = getattr(model, field)
         except AttributeError:
-            return self.animation.easing_options
-        if isinstance(value, (bool, str)):
-            return [
-                ef for ef in self.animation.easing_options if ef is EasingFunction.Step
-            ]
-        return self.animation.easing_options
+            return list(EasingFunction)
+        return EasingFunction.get_allowed_easings(value)
 
     def _is_on_track_line(self, x: int, y: int) -> bool:
         """Return ``True`` if *(x, y)* is near a track's horizontal centre line."""
@@ -859,7 +847,7 @@ class AnimationTimelineWidget(QWidget):
         allowed = (
             self._get_allowed_easings_for_track(track)
             if track is not None
-            else self.animation.easing_options
+            else list(EasingFunction)
         )
 
         targets = self.selected_keyframes if kf in self.selected_keyframes else [kf]
@@ -873,7 +861,7 @@ class AnimationTimelineWidget(QWidget):
             def _set(checked: bool, _ef: EasingFunction = ef) -> None:
                 for k in targets:
                     k.easing = _ef
-                self.animation.notify_easing_changed(list(targets))
+                self.animation.easing_changed(list(targets))
 
             action.triggered.connect(_set)
 
@@ -935,7 +923,7 @@ class AnimationTimelineWidget(QWidget):
                 return
             new_name = combo.itemText(idx)
             if new_name != track.name:
-                self.animation.remove_track(track)
+                self.animation.remove_track(track.name)
                 self.add_track(new_name)
             container.close()
 
@@ -948,7 +936,10 @@ class AnimationTimelineWidget(QWidget):
         click an item or type a search term and press Enter to add the first
         matching (highlighted) item.
         """
-        available = self.animation.available_track_options()
+        used = {t.name for t in self.animation.tracks}
+        available = [
+            name for name in self.animation.track_options if name not in used
+        ]
         if not available:
             return
 
@@ -1108,6 +1099,3 @@ class AnimationTimelineWidget(QWidget):
 
     def _interpolate_track(self, track: Track, frame: int) -> Any:
         return self.animation.interpolate_track(track, frame)
-
-    def _dispatch_track_callbacks(self, frame: int) -> None:
-        self.animation._dispatch_track_callbacks(frame)
