@@ -826,8 +826,8 @@ class AnimationTimelineWidget(QWidget):
     def _get_allowed_easings_for_track(self, track: Track) -> list[EasingFunction]:
         """Return the subset of ``easing_options`` appropriate for *track*'s type.
 
-        For ``bool`` fields only ``Step`` is offered since linear interpolation
-        of 0/1 produces non-boolean intermediates.
+        For ``str`` and ``bool`` fields only ``Step`` is offered since linear
+        interpolation of those types produces invalid intermediates.
         """
         binding = self.animation.track_options.get(track.name)
         if binding is None:
@@ -837,7 +837,7 @@ class AnimationTimelineWidget(QWidget):
             value = getattr(model, field)
         except AttributeError:
             return self.animation.easing_options
-        if isinstance(value, bool):
+        if isinstance(value, (bool, str)):
             return [
                 ef for ef in self.animation.easing_options if ef is EasingFunction.Step
             ]
@@ -1091,6 +1091,15 @@ class AnimationTimelineWidget(QWidget):
 
     # ------------------------------------------------------------------
     # Track management helpers
+
+    @property
+    def track_options(self) -> dict:
+        """Delegate to ``animation.track_options``."""
+        return self.animation.track_options
+
+    @track_options.setter
+    def track_options(self, value: dict) -> None:
+        self.animation.track_options = value
 
     def _can_add_track(self) -> bool:
         return self.animation._can_add_track()

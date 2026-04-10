@@ -153,9 +153,12 @@ class Keyframe(EventedModel):
         easing: EasingFunction = EasingFunction.Linear,
         **data: Any,
     ) -> None:
-        self.t = max(0, int(t))
-        self.value = _to_dict(value) if _is_model_or_dataclass(value) else value
-        self.easing = easing
+        super().__init__(
+            t=max(0, int(t)),
+            value=_to_dict(value) if _is_model_or_dataclass(value) else value,
+            easing=easing,
+            **data,
+        )
 
 
 class Track(EventedModel):
