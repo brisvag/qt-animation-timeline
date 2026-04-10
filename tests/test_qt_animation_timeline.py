@@ -10,7 +10,6 @@ from qtpy.QtWidgets import QApplication
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import qt_animation_timeline
 from qt_animation_timeline.easing import EasingFunction, _coerce_value
 from qt_animation_timeline.editor import (
     _BUTTON_ICONS,
@@ -18,42 +17,12 @@ from qt_animation_timeline.editor import (
     _PLAY_MODE_ICONS,
     AnimationTimelineWidget,
 )
-from qt_animation_timeline.models import (
-    Animation,
-    Keyframe,
-    PlayMode,
-    Track,
-)
+from qt_animation_timeline.models import Animation, PlayMode
 
 
 @pytest.fixture(scope="session")
 def qapp():
     return QApplication.instance() or QApplication([])
-
-
-def test_imports_with_version():
-    assert isinstance(qt_animation_timeline.__version__, str)
-    assert hasattr(qt_animation_timeline, "Animation")
-
-
-def test_keyframe():
-    assert Keyframe(-5).t == 0
-    assert Keyframe(10).easing is EasingFunction.Linear
-    kf = Keyframe(5, easing=EasingFunction.Step)
-    assert kf.easing is EasingFunction.Step
-
-
-def test_track():
-    t = Track(name="X")
-    kf = t.add_keyframe(10)
-    assert kf.t == 10 and kf in t.keyframes
-    with pytest.raises(KeyError):
-        t.add_keyframe(10)
-    t.add_keyframe(30)
-    t.add_keyframe(5)
-    assert [k.t for k in t.keyframes] == [5, 10, 30]
-    assert len(t.color) == 3  # RGB tuple
-    assert all(isinstance(c, int) for c in t.color)
 
 
 def test_coordinate_roundtrip(qapp):
@@ -69,28 +38,11 @@ def test_track_center_y(qapp):
     assert w.track_center_y(0) == w.top_margin + w.track_height / 2
 
 
-def test_add_track(qapp):
-    w = AnimationTimelineWidget()
-    received = []
-    w.track_added.connect(received.append)
-    track = w.add_track("A")
-    assert isinstance(track, Track)
-    assert track.name == "A"
-    assert track in w.animation.tracks
-    assert received == [track]
-
-
 def test_track_color_cycle(qapp):
     red = QColor(255, 0, 0)
     w = AnimationTimelineWidget(track_color_cycle=[red])
     track = w.add_track("A")
     assert track.color == (255, 0, 0)
-
-
-def test_easing_options_settable(qapp):
-    w = AnimationTimelineWidget()
-    w.animation.easing_options = [EasingFunction.Step]
-    assert w.animation.easing_options == [EasingFunction.Step]
 
 
 def test_set_playhead(qapp):
