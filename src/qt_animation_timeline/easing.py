@@ -7,6 +7,7 @@ import dataclasses
 import warnings
 from enum import Enum
 from math import cos, pi, pow, sin, sqrt
+from types import NoneType
 from typing import Any
 
 import numpy as np
@@ -251,11 +252,15 @@ def _coerce_value(reference: Any, interpolated: Any) -> Any:
     types are also returned unchanged — they arise only from the ``Step``
     easing which returns the original value directly.
     """
+    if isinstance(reference, bool | Enum):
+        # need to do before int or they will be converted to int
+        return interpolated
     if isinstance(reference, int):
         # back from float
         return round(interpolated)
     if isinstance(reference, dict):
         # assume at this point dicts have the same set of keys
+        print(reference, interpolated)
         return {
             k: _coerce_value(vref, vint)
             for (k, vref), (_, vint) in zip(
@@ -322,11 +327,9 @@ class EasingFunction(Enum):
         # str and bool should always fall back to step
         # (even though in some cases they can be cast to numbers)
         if (
-            v1 is None
-            or v2 is None
-            or isinstance(v1, str | bool)
-            or isinstance(v2, str | bool)
-            or self == EasingFunction.Step
+            self == EasingFunction.Step
+            or isinstance(v1, str | bool | Enum | NoneType)
+            or isinstance(v2, str | bool | Enum | NoneType)
         ):
             # with Step type is conserved, no need to cast
             return EasingFunction.Step.value[0](p, v1, v2)
