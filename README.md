@@ -8,7 +8,7 @@
 
 A blender-style timeline widget for qt to edit animations.
 
-<img width="880" height="236" alt="image" src="https://github.com/user-attachments/assets/9a677340-55b3-4706-aa30-65d694b2c466" />
+<img width="874" height="166" alt="image" src="https://github.com/user-attachments/assets/abf109b3-68ad-4d0b-876c-c413aa82367e" />
 
 ## Usage
 
