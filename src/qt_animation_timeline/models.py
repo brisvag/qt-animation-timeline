@@ -256,11 +256,20 @@ class Animation(EventedModel):
     ) -> None:
         """Bulk removal of keyframes."""
         for kf in keyframes:
-            # just to ensure they all exist
-            self._get_kf_track(kf)
-        for kf in keyframes:
-            kf.t += offset
+            track = self._get_kf_track(kf)
+            if any(kf_.t == kf.t + offset for kf_ in track.keyframes):
+                warnings.warn(
+                    f"Cannot move keyframe to time {kf.t}: frame already present.",
+                    stacklevel=2,
+                )
+            else:
+                kf.t += offset
         self.keyframes_moved(keyframes)
+        self._update_bound_models()
+
+    def change_easing(self, keyframe: Keyframe, easing: EasingFunction):
+        keyframe.easing = easing
+        self.easing_changed([keyframe])
         self._update_bound_models()
 
     def cycle_play_mode(self) -> None:

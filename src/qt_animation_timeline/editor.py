@@ -1054,6 +1054,3 @@ class AnimationTimelineWidget(QWidget):
                 else (180, 180, 180)
             )
         return self.animation.add_track(name, color)
-
-    def _interpolate_track(self, track: Track, frame: int) -> Any:
-        return self.animation.interpolate_track(track, frame)
