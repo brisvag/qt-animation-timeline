@@ -129,7 +129,7 @@ class Track(BaseModel):
         self.keyframes.remove(kf)
         return kf
 
-    def sorted(self) -> list[Keyframe]:
+    def keyframes_sorted(self) -> list[Keyframe]:
         return sorted(self.keyframes, key=lambda kf: kf.t)
 
 
@@ -225,17 +225,21 @@ class Animation(EventedModel):
         self._update_bound_models()
         return kf
 
+    def _get_kf_track(self, kf: Keyframe) -> Track:
+        for track in self.tracks:
+            for kf_ in track.keyframes:
+                if kf is kf_:
+                    return track
+        raise KeyError(f"Keyframe {kf} is not part of any track.")
+
     def remove_keyframes(
         self,
         keyframes: list[Keyframe],
     ) -> None:
         """Bulk removal of keyframes."""
         for kf in keyframes:
-            for track in self.tracks:
-                if kf in track:
-                    track.remove_keyframe(kf)
-                    break
-            raise KeyError(f"Keyframe {kf} is not part of any track.")
+            track = self._get_kf_track(kf)
+            track.remove_keyframe(kf)
         self.keyframes_removed(keyframes)
         self._update_bound_models()
 
@@ -246,10 +250,8 @@ class Animation(EventedModel):
     ) -> None:
         """Bulk removal of keyframes."""
         for kf in keyframes:
-            for track in self.tracks:
-                if kf in track:
-                    break
-            raise KeyError(f"Keyframe {kf} is not part of any track.")
+            # just to ensure they all exist
+            self._get_kf_track(kf)
         for kf in keyframes:
             kf.t += offset
         self.keyframes_moved(keyframes)
@@ -286,7 +288,7 @@ class Animation(EventedModel):
 
         Values before the first keyframe and after the last are held constant.
         """
-        kfs = track.sorted()
+        kfs = track.keyframes_sorted()
         if not kfs:
             return _UNSET
         if len(kfs) == 1 or frame <= kfs[0].t:

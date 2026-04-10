@@ -514,7 +514,7 @@ class AnimationTimelineWidget(QWidget):
         """Draw the connecting line and all keyframes for *track*."""
         cy = int(self.track_center_y(index))
         track_color = QColor(*track.color.as_rgb_tuple())
-        kfs = track.sorted()
+        kfs = track.keyframes_sorted()
 
         if len(kfs) >= 2:
             painter.setPen(QPen(track_color, self.line_thickness))
@@ -789,7 +789,7 @@ class AnimationTimelineWidget(QWidget):
         if not (0 <= track_index < len(self.animation.tracks)):
             return None
         track = self.animation.tracks[track_index]
-        kfs = track.sorted()
+        kfs = track.keyframes_sorted()
         if not kfs:
             return None
         frame = self.x_to_frame(x)
@@ -822,7 +822,7 @@ class AnimationTimelineWidget(QWidget):
         if not (0 <= track_index < len(self.animation.tracks)):
             return False
         # do not grab if outside if before or after the last keyframe
-        track_frames = self.animation.tracks[track_index].sorted()
+        track_frames = self.animation.tracks[track_index].keyframes_sorted()
         frame = self.x_to_frame(x)
         if (
             len(track_frames) < 2
