@@ -167,6 +167,7 @@ class AnimationTimelineWidget(QWidget):
 
         self._play_timer = QTimer(self)
         self._play_timer.timeout.connect(self._on_timer_tick)
+        self._frame_iterator = None
 
         self.h_scroll = QScrollBar(Qt.Orientation.Horizontal, self)
         self.v_scroll = QScrollBar(Qt.Orientation.Vertical, self)
@@ -177,7 +178,6 @@ class AnimationTimelineWidget(QWidget):
         self.label_font = QFont("Arial", font_size)
 
         self.animation.events.current_frame.connect(self._bare_update)
-        self.animation.events.playing.connect(self._on_playing_changed)
         self.animation.track_added.connect(self._update_geometry)
         self.animation.track_removed.connect(self._on_track_removed)
         self.animation.track_renamed.connect(self._update_geometry)
@@ -204,17 +204,6 @@ class AnimationTimelineWidget(QWidget):
     def _bare_update(self):
         # needed for signals not to pass wrong arguments to qt update
         self.update()
-
-    def _on_playing_changed(self, playing: bool) -> None:
-        if playing:
-            interval = max(1, int(1000 / (self.animation.play_fps)))
-            self._play_timer.start(interval)
-        else:
-            self._play_timer.stop()
-        self.update()
-
-    def _on_timer_tick(self) -> None:
-        self.animation.advance_playhead()
 
     def sizeHint(self) -> QSize:
         """Return a size fitting current tracks and visible keyframe range."""
@@ -470,7 +459,7 @@ class AnimationTimelineWidget(QWidget):
             self.loop_btn_text_color,
         )
 
-        play_icon = "pause" if self.animation.playing else "play"
+        play_icon = "pause" if self._frame_iterator is not None else "play"
         painter.fillRect(QRect(2 * btn_w, 0, btn_w3, h), self.play_btn_color)
         _render_svg_icon(
             painter, QRect(2 * btn_w, 0, btn_w3, h), play_icon, self.play_btn_text_color
@@ -568,6 +557,7 @@ class AnimationTimelineWidget(QWidget):
             self._reset_view()
         elif x < 2 * btn_w:
             self.animation.cycle_play_mode()
+            self._frame_iterator = None
         else:
             self._toggle_playback()
 
@@ -999,7 +989,24 @@ class AnimationTimelineWidget(QWidget):
             self._set_playhead(self.animation.current_frame + 1)
 
     def _toggle_playback(self) -> None:
-        self.animation.playing = not self.animation.playing
+        if not self._frame_iterator:
+            interval = max(1, int(1000 / (self.animation.play_fps)))
+            self._frame_iterator = self.animation.iter_frames()
+            self._play_timer.start(interval)
+        else:
+            self._frame_iterator = None
+            self._play_timer.stop()
+        self.update()
+
+    def _on_timer_tick(self) -> None:
+        if self._frame_iterator is None:
+            self._toggle_playback()
+        try:
+            next(self._frame_iterator)
+        except StopIteration:
+            self._play_timer.stop()
+            self._frame_iterator = None
+            self.update()
 
     def _reset_view(self) -> None:
         """Fit the entire keyframe range in the viewport and scroll to the origin.

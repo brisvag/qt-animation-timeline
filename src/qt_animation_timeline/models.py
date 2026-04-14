@@ -6,7 +6,7 @@ import dataclasses
 import itertools
 import warnings
 from enum import Enum
-from typing import Annotated, Any, ClassVar, Literal
+from typing import Annotated, Any, ClassVar
 
 from psygnal import Signal
 from psygnal._evented_model import EventedModel
@@ -141,7 +141,7 @@ class Track(BaseModel):
         new_t = max(0, kf.t + offset)
         for kf_ in self.keyframes:
             if new_t == kf_.t:
-                raise ValueError(
+                raise KeyError(
                     f"cannot move keyframe {kf} to {new_t}: frame is occupied."
                 )
         kf.t = new_t
@@ -158,9 +158,7 @@ class Animation(EventedModel):
     tracks: list[Track] = Field(default_factory=list)
 
     current_frame: Annotated[int, Field(ge=0)] = 0
-    playing: bool = False
     play_mode: PlayMode = PlayMode.NORMAL
-    play_direction: Literal[-1, 1] = 1
     play_fps: Annotated[int, Field(gt=0)] = 30
 
     track_added: ClassVar[Signal] = Signal(object)
@@ -275,10 +273,15 @@ class Animation(EventedModel):
             track = self._get_kf_track(kf)
             try:
                 track.move_keyframe(kf, offset)
-            except ValueError:
+            except KeyError:
                 warnings.warn(
                     f"Cannot move keyframe to frame {kf.t + offset} on track "
                     f'"{track.name}": a keyframe already exists here. Skipping.',
+                    stacklevel=1,
+                )
+            except ValueError:
+                warnings.warn(
+                    "Cannot move keyframe below frame 0. Skipping.",
                     stacklevel=1,
                 )
         self.keyframes_moved(keyframes)
@@ -292,28 +295,6 @@ class Animation(EventedModel):
     def cycle_play_mode(self) -> None:
         """Cycle normal -> loop -> pingpong -> normal."""
         self.play_mode = PlayMode((self.play_mode + 1) % 3)
-        self.play_direction = 1
-
-    def advance_playhead(self) -> None:
-        """Advance one frame according to the current play mode."""
-        max_frame = max((kf.t for t in self.tracks for kf in t.keyframes), default=0)
-        next_frame = self.current_frame + self.play_direction
-        if self.play_mode == PlayMode.NORMAL:
-            if next_frame > max_frame:
-                self.playing = False
-                self.current_frame = max_frame
-                return
-        elif self.play_mode == PlayMode.LOOP:
-            if next_frame > max_frame:
-                next_frame = 0
-        elif self.play_mode == PlayMode.PINGPONG:
-            if next_frame > max_frame:
-                self.play_direction = -1
-                next_frame = max(0, max_frame - 1)
-            elif next_frame < 0:
-                self.play_direction = 1
-                next_frame = min(1, max_frame)
-        self.current_frame = next_frame
 
     def interpolate_track(self, track: Track, frame: int) -> Any:
         """Return the interpolated value of track at frame, or ``None``.
@@ -335,6 +316,18 @@ class Animation(EventedModel):
                 return k1.easing(p, k1.value, k2.value)
         return kfs[-1].value
 
+    @property
+    def n_frames(self):
+        max_frame = 0
+        for tr in self.tracks:
+            for kf in tr.keyframes:
+                max_frame = max(max_frame, kf.t)
+        return max_frame
+
+    @property
+    def duration(self):
+        return self.n_frames / self.play_fps
+
     def _update_bound_models(self) -> None:
         """Update each bound model field to the interpolated value at frame.
 
@@ -352,3 +345,39 @@ class Animation(EventedModel):
                 _update_model_inplace(original, value)
             else:
                 setattr(model, field, value)
+
+    def iter_frames(self, start=0, end=None, direction=1):
+        if end is None:
+            end = self.n_frames if direction == 1 else 0
+        if (end - start) / direction < 0:
+            raise ValueError("direction does not match start and stop positions.")
+        if end - start == 0:
+            return
+
+        # more convenient to always work with ordered bounds
+        if end < start:
+            start, end = end, start
+            direction *= -1
+            frame = end
+        else:
+            frame = start
+
+        self.current_frame = frame
+        yield
+
+        while True:
+            frame = frame + direction
+            if frame > end:
+                if self.play_mode == PlayMode.NORMAL:
+                    return
+                elif self.play_mode == PlayMode.LOOP:
+                    frame = start
+                elif self.play_mode == PlayMode.PINGPONG:
+                    direction = -1
+                    frame = end - 1
+            elif frame < start and PlayMode.PINGPONG and direction == -1:
+                direction = 1
+                frame = start + 1
+
+            self.current_frame = frame
+            yield
