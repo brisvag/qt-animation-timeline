@@ -583,7 +583,7 @@ class AnimationTimelineWidget(QWidget):
             self.animation.cycle_play_mode()
             self._frame_iterator = None
         else:
-            self._toggle_playback()
+            self.toggle_playback()
 
     def _handle_label_click(self, x: int, y: int, global_pos: object) -> None:
         """Handle a left-click inside the label column (remove / add buttons)."""
@@ -1014,13 +1014,13 @@ class AnimationTimelineWidget(QWidget):
             self.animation.remove_keyframes(removed)
             self.selected_keyframes.clear()
         elif event.key() == Qt.Key.Key_Space:
-            self._toggle_playback()
+            self.toggle_playback()
         elif event.key() == Qt.Key.Key_Left:
             self._set_playhead(max(0, self.animation.current_frame - 1))
         elif event.key() == Qt.Key.Key_Right:
             self._set_playhead(self.animation.current_frame + 1)
 
-    def _toggle_playback(self) -> None:
+    def toggle_playback(self) -> None:
         if not self._frame_iterator:
             interval = max(1, int(1000 / (self.animation.play_fps)))
             start, stop = (0, None) if self._play_range is None else self._play_range
@@ -1036,7 +1036,7 @@ class AnimationTimelineWidget(QWidget):
 
     def _on_timer_tick(self) -> None:
         if self._frame_iterator is None:
-            self._toggle_playback()
+            self.toggle_playback()
         try:
             next(self._frame_iterator)
         except StopIteration:
