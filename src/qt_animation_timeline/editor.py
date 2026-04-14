@@ -486,7 +486,7 @@ class AnimationTimelineWidget(QWidget):
         """Draw the connecting line and all keyframes for *track*."""
         cy = int(self.track_center_y(index))
         track_color = QColor(*track.color.as_rgb_tuple())
-        kfs = track.keyframes_sorted()
+        kfs = track.keyframes
 
         if len(kfs) >= 2:
             painter.setPen(QPen(track_color, self.line_thickness))
@@ -640,11 +640,10 @@ class AnimationTimelineWidget(QWidget):
 
     def _move_track_keyframes(self, x: int) -> None:
         assert self._dragging_track is not None
-        delta = self.x_to_frame(x) - self.x_to_frame(self._track_drag_x)
-        if delta == 0:
+        offset = self.x_to_frame(x) - self.x_to_frame(self._track_drag_x)
+        if offset == 0:
             return
-        for kf in self._dragging_track.keyframes:
-            kf.t = max(0, kf.t + delta)
+        self.animation.move_keyframes(self._dragging_track.keyframes, offset)
         self._track_drag_x = x
         self._track_moved = True
         self.update_scrollbars()
@@ -653,11 +652,10 @@ class AnimationTimelineWidget(QWidget):
     def _move_selected_keyframes(self, x: int) -> None:
         assert self._drag_pivot is not None
         target = max(0, self.x_to_frame(x) - self._drag_offset)
-        delta = target - self._drag_pivot.t
-        if delta == 0:
+        offset = target - self._drag_pivot.t
+        if offset == 0:
             return
-        for kf in self.selected_keyframes:
-            kf.t = max(0, kf.t + delta)
+        self.animation.move_keyframes(self.selected_keyframes, offset)
         self.update_scrollbars()
         self.update()
 
@@ -758,7 +756,7 @@ class AnimationTimelineWidget(QWidget):
         if not (0 <= track_index < len(self.animation.tracks)):
             return None
         track = self.animation.tracks[track_index]
-        kfs = track.keyframes_sorted()
+        kfs = track.keyframes
         if not kfs:
             return None
         frame = self.x_to_frame(x)
@@ -791,7 +789,7 @@ class AnimationTimelineWidget(QWidget):
         if not (0 <= track_index < len(self.animation.tracks)):
             return False
         # do not grab if outside if before or after the last keyframe
-        track_frames = self.animation.tracks[track_index].keyframes_sorted()
+        track_frames = self.animation.tracks[track_index].keyframes
         frame = self.x_to_frame(x)
         if (
             len(track_frames) < 2

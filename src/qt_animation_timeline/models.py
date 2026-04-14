@@ -10,7 +10,6 @@ from typing import Annotated, Any, ClassVar, Literal
 
 from psygnal import Signal
 from psygnal._evented_model import EventedModel
-from psygnal.containers import EventedList, EventedSet
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_extra_types.color import Color
 
@@ -84,10 +83,6 @@ class Keyframe(BaseModel):
             return _to_dict(value)
         return value
 
-    def __hash__(self):
-        """Needed to ensure unique t in sets."""
-        return hash((Keyframe, self.t))
-
 
 class Track(BaseModel):
     """A named, colored animation track holding a set of keyframes."""
@@ -96,7 +91,7 @@ class Track(BaseModel):
 
     name: str
     color: Color = Color((180, 180, 180))
-    keyframes: EventedSet = Field(default_factory=EventedSet)
+    keyframes: list = Field(default_factory=list)
 
     def add_keyframe(
         self,
@@ -105,34 +100,53 @@ class Track(BaseModel):
         easing: EasingFunction = EasingFunction.Linear,
     ) -> Keyframe:
         """Add a keyframe at frame t."""
-        kf = Keyframe(t=t, value=value, easing=easing)
-        if kf in self.keyframes:
-            raise KeyError(
-                f'keyframe at frame {t} already exists in track "{self.name}"'
-            )
-        self.keyframes.add(kf)
-        return kf
-
-    def _get_kf(self, t: int) -> Keyframe:
         for kf in self.keyframes:
             if kf.t == t:
-                return kf
+                raise KeyError(
+                    f'keyframe at frame {t} already exists in track "{self.name}"'
+                )
+        kf = Keyframe(t=t, value=value, easing=easing)
+        self.keyframes.append(kf)
+        self.keyframes.sort(key=lambda kf: kf.t)
+        return kf
+
+    def _get_kf(self, kf_or_t: int | Keyframe) -> Keyframe:
+        if isinstance(kf_or_t, int):
+            t = kf_or_t
+            for kf in self.keyframes:
+                if kf.t == t:
+                    return kf
+            else:
+                raise KeyError(f"keyframe at frame {t} does not exist")
         else:
-            raise KeyError(f"keyframe at frame {t} does not exist")
+            kf = kf_or_t
+            if kf not in self.keyframes:
+                raise KeyError(f'keyframe {kf} is not part of track "{self.name}s"')
+            return kf
 
     def remove_keyframe(
         self,
         kf_or_t: Keyframe | int,
     ) -> Keyframe:
-        if isinstance(kf_or_t, int):
-            kf = self._get_kf(kf_or_t)
-        else:
-            kf = kf_or_t
+        kf = self._get_kf(kf_or_t)
         self.keyframes.remove(kf)
         return kf
 
-    def keyframes_sorted(self) -> list[Keyframe]:
-        return sorted(self.keyframes, key=lambda kf: kf.t)
+    def move_keyframe(
+        self,
+        kf_or_t: Keyframe | int,
+        offset: int,
+    ) -> Keyframe:
+        kf = self._get_kf(kf_or_t)
+        new_t = max(0, kf.t + offset)
+        for kf_ in self.keyframes:
+            if new_t == kf_.t:
+                raise ValueError(
+                    f"cannot move keyframe {kf} to {new_t}: frame is occupied."
+                )
+        kf.t = new_t
+        self.keyframes.sort(key=lambda kf: kf.t)
+        return kf
 
 
 class Animation(EventedModel):
@@ -141,7 +155,7 @@ class Animation(EventedModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
 
     track_options: dict[str, tuple[Any, str]] = Field(default_factory=dict)
-    tracks: EventedList[Track] = Field(default_factory=EventedList)
+    tracks: list[Track] = Field(default_factory=list)
 
     current_frame: Annotated[int, Field(ge=0)] = 0
     playing: bool = False
@@ -259,13 +273,14 @@ class Animation(EventedModel):
         """Bulk removal of keyframes."""
         for kf in keyframes:
             track = self._get_kf_track(kf)
-            if any(kf_.t == kf.t + offset for kf_ in track.keyframes):
+            try:
+                track.move_keyframe(kf, offset)
+            except ValueError:
                 warnings.warn(
-                    f"Cannot move keyframe to time {kf.t}: frame already present.",
-                    stacklevel=2,
+                    f"Cannot move keyframe to frame {kf.t + offset} on track "
+                    f'"{track.name}": a keyframe already exists here. Skipping.',
+                    stacklevel=1,
                 )
-            else:
-                kf.t += offset
         self.keyframes_moved(keyframes)
         self._update_bound_models()
 
@@ -305,7 +320,7 @@ class Animation(EventedModel):
 
         Values before the first keyframe and after the last are held constant.
         """
-        kfs = track.keyframes_sorted()
+        kfs = track.keyframes
         if not kfs:
             return _UNSET
         if len(kfs) == 1 or frame <= kfs[0].t:
