@@ -49,6 +49,7 @@ _DEFAULT_COLORS: dict[str, QColor] = {
     "time_line_color": QColor(180, 180, 180, 120),
     "time_label_color": QColor(200, 200, 200),
     "current_frame_color": QColor(255, 0, 0),
+    "selected_range_color": QColor(0, 0, 255),
     "add_button_color": QColor(80, 150, 80),
     "remove_button_color": QColor(180, 80, 80),
     "rubber_band_fill": QColor(100, 150, 255, 50),
@@ -157,6 +158,9 @@ class AnimationTimelineWidget(QWidget):
         self._dragging_keyframes: bool = False
         self._track_moved: bool = False
         self._scrubbing: bool = False
+        self._selecting_range: bool = False
+        self._play_range_start: int | None = None
+        self._play_range: tuple[int, int] | None = None
         self._box_start: QPoint | None = None
         self._box_rect: QRect | None = None
         self._dragging_track: Track | None = None
@@ -352,7 +356,10 @@ class AnimationTimelineWidget(QWidget):
         self._draw_labels(painter, metrics)
         self._draw_add_button(painter)
         self._draw_control_buttons(painter)
+        self._draw_play_range(painter)
+        self._draw_playhead(painter)
 
+    def _draw_playhead(self, painter: QPainter) -> None:
         x = self.frame_to_x(self.animation.current_frame)
         if x >= self.left_margin:
             xi = int(x)
@@ -363,6 +370,16 @@ class AnimationTimelineWidget(QWidget):
             s = 7
             pts = [QPoint(xi - s, 0), QPoint(xi + s, 0), QPoint(xi, s + 5)]
             painter.drawPolygon(pts)
+
+    def _draw_play_range(self, painter: QPainter) -> None:
+        if self._play_range is None:
+            return
+        start, end = (self.frame_to_x(s) for s in self._play_range)
+        for x in (start, end):
+            if self.left_margin <= x <= self.width():
+                xi = int(x)
+                painter.setPen(QPen(self.selected_range_color, 2))
+                painter.drawLine(xi, 0, xi, self.height())
 
     def _draw_track_backgrounds(self, painter: QPainter) -> None:
         for i in range(len(self.animation.tracks)):
@@ -521,8 +538,15 @@ class AnimationTimelineWidget(QWidget):
             if x < self.left_margin:
                 self._handle_control_click(x, y)
             else:
-                self._scrubbing = True
-                self._set_playhead(max(0, self.x_to_frame(x)))
+                if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                    frame = max(0, self.x_to_frame(x))
+                    self._play_range = None
+                    self._selecting_range = True
+                    self._play_range_start = frame
+                    self._frame_iterator = None
+                else:
+                    self._scrubbing = True
+                    self._set_playhead(max(0, self.x_to_frame(x)))
             return
 
         if x < self.left_margin:
@@ -599,6 +623,13 @@ class AnimationTimelineWidget(QWidget):
 
         if self._scrubbing:
             self._set_playhead(max(0, self.x_to_frame(x)))
+            return
+
+        if self._selecting_range:
+            frame = max(0, self.x_to_frame(x))
+            self._play_range = tuple(sorted((self._play_range_start, frame)))
+            self._frame_iterator = None
+            self.update()
             return
 
         if self._dragging_track is not None:
@@ -679,6 +710,7 @@ class AnimationTimelineWidget(QWidget):
             self.animation._update_bound_models()
 
         self._scrubbing = False
+        self._selecting_range = False
         self._drag_pivot = None
         self._dragging_keyframes = False
         self._box_start = None
@@ -991,7 +1023,8 @@ class AnimationTimelineWidget(QWidget):
     def _toggle_playback(self) -> None:
         if not self._frame_iterator:
             interval = max(1, int(1000 / (self.animation.play_fps)))
-            self._frame_iterator = self.animation.iter_frames()
+            start, stop = (0, None) if self._play_range is None else self._play_range
+            self._frame_iterator = self.animation.iter_frames(start, stop)
             self._play_timer.start(interval)
         else:
             self._frame_iterator = None
