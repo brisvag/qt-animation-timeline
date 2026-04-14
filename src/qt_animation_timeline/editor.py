@@ -1031,6 +1031,9 @@ class AnimationTimelineWidget(QWidget):
             self._play_timer.stop()
         self.update()
 
+    def is_playing(self) -> bool:
+        return self._play_timer.isActive()
+
     def _on_timer_tick(self) -> None:
         if self._frame_iterator is None:
             self._toggle_playback()
