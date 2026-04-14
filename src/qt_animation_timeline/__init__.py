@@ -11,13 +11,14 @@ __email__ = "brisvag@gmail.com"
 
 from qt_animation_timeline.easing import EasingFunction, _coerce_value
 from qt_animation_timeline.editor import AnimationTimelineWidget
-from qt_animation_timeline.models import Animation, Keyframe, Track
+from qt_animation_timeline.models import Animation, Keyframe, PlayMode, Track
 
 __all__ = [
     "Animation",
     "AnimationTimelineWidget",
     "EasingFunction",
     "Keyframe",
+    "PlayMode",
     "Track",
     "_coerce_value",
 ]
