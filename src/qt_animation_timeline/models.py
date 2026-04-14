@@ -380,4 +380,4 @@ class Animation(EventedModel):
                 frame = start + 1
 
             self.current_frame = frame
-            yield
+            yield self.current_frame
