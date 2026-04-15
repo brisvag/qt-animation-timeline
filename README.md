@@ -10,9 +10,29 @@ A blender-style timeline widget for qt to edit animations.
 
 <img width="874" height="166" alt="image" src="https://github.com/user-attachments/assets/abf109b3-68ad-4d0b-876c-c413aa82367e" />
 
+## Controls
+
+| Action | Mouse/Key binding | Region |
+| -- | -- | -- |
+| New Keyframe | Double click | Track |
+| Select Keyframe | Click | Keyframe |
+| Select multiple | Ctrl + Click | Keyframe |
+| Select with box | Shift + Click | Tracks |
+| Delete selected | Del | - |
+| Move Selected Keyframes | Drag | Keyframe |
+| Move whole track | Drag | Track Line |
+| Change easing function | Right Click | Track Line or Keyframe |
+| Scrub playhead | Drag | Header |
+| Select play range | Shift + Drag | Header |
+| Play/Pause animation | Space | - |
+
+
 ## Usage
 
-The widget is designed to work with dataclass/pydantic style models directly.
+The widget takes a mapping of track names to python objects and attribute names, allowing automatic
+setting of the interpolated values of such object given the current state of the animation model.
+
+The widget is designed to work with nested dataclass/pydantic style models, but will work just fine with anything else non-nested.
 
 ```py
 from pydantic import BaseModel
@@ -26,6 +46,9 @@ class Circle(BaseModel):
 
 circle = Circle()
 
+# mapping of names of tracks to a tuple of object/attribute
+# any time a change in the animation occur, the object's attribute
+# will be updated with the new interpolated value.
 track_options = {
     'color': (circle, 'color'),
     'size': (circle, 'size')
