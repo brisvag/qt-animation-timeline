@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from pydantic import BaseModel
 from pydantic_extra_types.color import Color
-from qtpy.QtCore import QEvent, QPoint, QRect, Qt
+from qtpy.QtCore import QEvent, QPointF, QRect, Qt
 from qtpy.QtGui import QColor, QKeyEvent, QMouseEvent
 from qtpy.QtWidgets import QApplication
 
@@ -120,7 +120,7 @@ def test_unique_track_options(timeline):
 
 def _make_press(x, y, shift=False, button=Qt.MouseButton.LeftButton):
     mod = Qt.KeyboardModifier.ShiftModifier if shift else Qt.KeyboardModifier.NoModifier
-    return QMouseEvent(QEvent.Type.MouseButtonPress, QPoint(x, y), button, button, mod)
+    return QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(x, y), button, button, mod)
 
 
 def test_rubber_band_selection(timeline):
@@ -301,7 +301,7 @@ def test_right_double_click_ignored(timeline):
     y = int(timeline.track_center_y(0))
     event = QMouseEvent(
         QEvent.Type.MouseButtonDblClick,
-        QPoint(x, y),
+        QPointF(x, y),
         Qt.MouseButton.RightButton,
         Qt.MouseButton.RightButton,
         Qt.KeyboardModifier.NoModifier,
