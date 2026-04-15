@@ -982,12 +982,7 @@ class AnimationTimelineWidget(QWidget):
                 self.add_track(name)
             container.close()
 
-        def _add_from_enter() -> None:
-            _add(combo.currentIndex())
-
         combo.activated.connect(_add)
-        if combo.lineEdit() is not None:
-            combo.lineEdit().returnPressed.connect(_add_from_enter)
 
     def _scroll_x_for_zoom(self, mouse_x: int, old_fw: float, new_fw: float) -> int:
         """Compute the ``scroll_x`` that keeps the frame under *mouse_x* fixed."""
