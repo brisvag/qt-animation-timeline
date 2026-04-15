@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import warnings
 from collections.abc import Iterable
 from enum import Enum
@@ -235,14 +234,6 @@ def _easing_step(p: float, v_start: Any, v_end: Any) -> Any:
     return v_end if p >= 0.5 else v_start
 
 
-def _is_model_or_dataclass(obj: Any) -> bool:
-    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        return True
-    return hasattr(obj, "model_dump") or (
-        hasattr(obj, "dict") and hasattr(obj, "__fields__")
-    )
-
-
 def _is_collection(obj: Any) -> bool:
     # exclude stuff like strings and numpy arrays which are handled differently
     return (
@@ -377,7 +368,8 @@ class EasingFunction(Enum):
             return _coerce_value(reference, interp)
         except (ValueError, TypeError):
             warnings.warn(
-                f"could not interpolate between {v1} and {v2}. Falling back to Step.",
+                f"could not interpolate {v1} -> {v2} using {self.name} function."
+                " Falling back to Step.",
                 stacklevel=2,
             )
             return EasingFunction.Step.value[0](p, v1, v2)

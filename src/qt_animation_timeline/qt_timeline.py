@@ -760,8 +760,8 @@ class AnimationTimelineWidget(QWidget):
         frame = max(0, self.x_to_frame(x))
         track = self.animation.tracks[track_index]
 
-        binding = self.animation.track_options.get(track.name)
-        initial_value = getattr(binding[0], binding[1]) if binding is not None else 0
+        model, attr = self.animation.track_options.get(track.name)
+        initial_value = model if attr == "" else getattr(model, attr)
 
         try:
             self.animation.add_keyframe(track.name, frame, value=initial_value)
@@ -817,10 +817,7 @@ class AnimationTimelineWidget(QWidget):
         For ``str`` and ``bool`` fields only ``Step`` is offered since linear
         interpolation of those types produces invalid intermediates.
         """
-        binding = self.animation.track_options.get(track.name)
-        if binding is None:
-            return list(EasingFunction)
-        model, field = binding
+        model, field = self.animation.track_options.get(track.name)
         try:
             value = getattr(model, field)
         except AttributeError:

@@ -6,14 +6,17 @@ import dataclasses
 import itertools
 import warnings
 from enum import Enum
-from typing import Annotated, Any, ClassVar
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 
 from psygnal import Signal
 from psygnal._evented_model import EventedModel
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_extra_types.color import Color
 
-from qt_animation_timeline.easing import EasingFunction, _is_model_or_dataclass
+from qt_animation_timeline.easing import EasingFunction, _is_collection
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 class PlayMode(int, Enum):
@@ -31,37 +34,82 @@ def _to_dict(obj: Any) -> dict[str, Any]:
         return dict(obj)
     if hasattr(obj, "model_dump"):
         return obj.model_dump()
-    if hasattr(obj, "dict") and hasattr(obj, "__fields__"):
-        return obj.dict()
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return {f.name: getattr(obj, f.name) for f in dataclasses.fields(obj)}
+    if hasattr(obj, "dict"):
+        return obj.dict()
     warnings.warn(
         f"object of type {type(obj)} could not be converted to dict.", stacklevel=2
     )
     return {}
 
 
+def _is_model_or_dataclass(obj: Any) -> bool:
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return True
+    return hasattr(obj, "model_dump") or (
+        hasattr(obj, "dict") and hasattr(obj, "__fields__")
+    )
+
+
+def _is_model_container(obj: Any) -> bool:
+    return _is_collection(obj) and all(
+        _is_model_container(el) or _is_model_or_dataclass(el) for el in obj
+    )
+
+
+def _is_frozen_field(obj: Any, field: str) -> bool:
+    if dataclasses.is_dataclass(obj) and obj.__dataclass_params__.frozen:
+        return True
+    if hasattr(obj, "model_config") and obj.model_config.get("frozen", False):
+        return True
+    if hasattr(obj, "model_fields") and obj.model_fields[field].frozen:
+        return True
+    return False
+
+
+def _update_container_models(obj: Iterable, data: Iterable):
+    try:
+        print(f"doing {obj}")
+        for el_old, el_new in zip(obj, data, strict=False):
+            _update_model_inplace(el_old, el_new)
+    except:
+        # TODO: handle issues, like wrong number of models
+        raise
+
+
 def _update_model_inplace(target: Any, data: dict) -> None:
     """Update a model/dataclass inplace from the given data."""
-    if hasattr(target, "update") and callable(target.update):
-        target.update(data)
-        return
-
-    for key, val in data.items():
+    data_copy = data.copy()
+    update_method = getattr(target, "update", None)
+    for key in data:
         missing = object()
-        field = getattr(target, key, missing)
+        current = getattr(target, key, missing)
+        if current is missing:
+            raise KeyError(f'Field "{current}" is missing from {target}.')
+
         try:
-            if (
-                field is not missing
-                and _is_model_or_dataclass(field)
-                and _is_model_or_dataclass(val)
-            ):
-                _update_model_inplace(field, val)
-            else:
-                setattr(target, key, val)
+            if _is_frozen_field(target, key):
+                # frozen fields cannot be handled by update method,
+                # so just attempt to update inplace directly and remove
+                # from the dict
+                # TODO: this can be simplified if we handle frozen fields
+                #       better in napari within update()
+                new_val = data_copy.pop(key)
+                if _is_model_or_dataclass(current):
+                    _update_model_inplace(current, new_val)
+                if _is_model_container(current):
+                    _update_container_models(current, new_val)
+                # if it's neither a model nor a container of models, leave it alone
+            elif update_method is None:
+                new_val = data_copy.pop(key)
+                setattr(target, key, new_val)
         except (AttributeError, TypeError):
-            warnings.warn(f"setting values to {target} failed", stacklevel=2)
+            warnings.warn(f"setting values to {target} failed ()", stacklevel=2)
             pass
+
+    if update_method is not None:
+        update_method(data_copy)
 
 
 class Keyframe(BaseModel):
