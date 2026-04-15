@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-import warnings
+import logging
 from collections.abc import Iterable
 from enum import Enum
 from math import cos, pi, pow, sin, sqrt
@@ -13,6 +13,9 @@ from typing import Any
 import numpy as np
 
 tau = pi * 2
+
+
+logger = logging.getLogger(__name__)
 
 
 def linear_interpolation(p):
@@ -367,9 +370,11 @@ class EasingFunction(Enum):
                 interp = self.value[0](p, v1, v2)
             return _coerce_value(reference, interp)
         except (ValueError, TypeError):
-            warnings.warn(
-                f"could not interpolate {v1} -> {v2} using {self.name} function."
+            logger.info(
+                "could not interpolate %s -> %s using %s function."
                 " Falling back to Step.",
-                stacklevel=2,
+                v1,
+                v2,
+                self.name,
             )
             return EasingFunction.Step.value[0](p, v1, v2)

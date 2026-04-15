@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
+import logging
 import warnings
 from enum import Enum
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar
@@ -17,6 +18,8 @@ from qt_animation_timeline.easing import EasingFunction, _is_collection
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+logger = logging.getLogger(__name__)
 
 
 class PlayMode(int, Enum):
@@ -89,11 +92,16 @@ def _is_model_container(obj: Any) -> bool:
 
 def _update_container_models(obj: Iterable, data: Iterable):
     try:
-        for el_old, el_new in zip(obj, data, strict=False):
+        for el_old, el_new in zip(obj, data, strict=True):
             _update_model_inplace(el_old, el_new)
-    except:
-        # TODO: handle issues, like wrong number of models
-        raise
+    except ValueError as e:
+        if e.args and "zip() argument" in e.args[0]:
+            # different number of elements. Just give up.
+            logger.info(
+                "%s and %s have different lengths. Cannot update.", el_old, el_new
+            )
+        else:
+            raise e
 
 
 def _update_model_inplace(target: Any, data: dict) -> None:
