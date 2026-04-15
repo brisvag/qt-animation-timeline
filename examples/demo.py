@@ -15,7 +15,7 @@ from psygnal import EventedModel
 from qtpy.QtWidgets import QApplication
 
 from qt_animation_timeline.easing import EasingFunction
-from qt_animation_timeline.editor import AnimationTimelineWidget
+from qt_animation_timeline.qt_timeline import AnimationTimelineWidget
 
 
 class Camera:

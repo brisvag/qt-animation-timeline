@@ -13,13 +13,13 @@ from qtpy.QtWidgets import QApplication
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from qt_animation_timeline.easing import EasingFunction, _coerce_value
-from qt_animation_timeline.editor import (
+from qt_animation_timeline.models import Animation, PlayMode
+from qt_animation_timeline.qt_timeline import (
     _BUTTON_ICONS,
     _DEFAULT_COLORS,
     _PLAY_MODE_ICONS,
     AnimationTimelineWidget,
 )
-from qt_animation_timeline.models import Animation, PlayMode
 
 
 @pytest.fixture(scope="session")
@@ -348,7 +348,7 @@ def test_reset_view(timeline):
 
 
 def test_default_colors(timeline):
-    from qt_animation_timeline.editor import _DEFAULT_TRACK_COLORS
+    from qt_animation_timeline.qt_timeline import _DEFAULT_TRACK_COLORS
 
     assert len(_DEFAULT_TRACK_COLORS) == 7
     for c in _DEFAULT_TRACK_COLORS:

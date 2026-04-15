@@ -9,9 +9,9 @@ except PackageNotFoundError:
 __author__ = "Lorenzo Gaifas"
 __email__ = "brisvag@gmail.com"
 
-from qt_animation_timeline.easing import EasingFunction, _coerce_value
-from qt_animation_timeline.editor import AnimationTimelineWidget
+from qt_animation_timeline.easing import EasingFunction
 from qt_animation_timeline.models import Animation, Keyframe, PlayMode, Track
+from qt_animation_timeline.qt_timeline import AnimationTimelineWidget
 
 __all__ = [
     "Animation",
@@ -20,5 +20,4 @@ __all__ = [
     "Keyframe",
     "PlayMode",
     "Track",
-    "_coerce_value",
 ]
