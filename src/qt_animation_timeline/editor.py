@@ -375,6 +375,28 @@ class AnimationTimelineWidget(QWidget):
         if self._play_range is None:
             return
         start, end = (self.frame_to_x(s) for s in self._play_range)
+
+        color_fill = QColor(self.bg_color)
+        color_fill.setAlpha(150)
+
+        if start > self.left_margin:
+            painter.fillRect(
+                self.left_margin,
+                self.top_margin,
+                int(start) - self.left_margin,
+                self.height(),
+                color_fill,
+            )
+
+        if end < self.width():
+            painter.fillRect(
+                int(end),
+                self.top_margin,
+                self.scroll_x + self.width(),
+                self.height(),
+                color_fill,
+            )
+
         for x in (start, end):
             if self.left_margin <= x <= self.width():
                 xi = int(x)
