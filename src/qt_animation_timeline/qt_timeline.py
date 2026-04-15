@@ -760,11 +760,8 @@ class AnimationTimelineWidget(QWidget):
         frame = max(0, self.x_to_frame(x))
         track = self.animation.tracks[track_index]
 
-        model, attr = self.animation.track_options.get(track.name)
-        initial_value = model if attr == "" else getattr(model, attr)
-
         try:
-            self.animation.add_keyframe(track.name, frame, value=initial_value)
+            self.animation.add_keyframe_from_state(track.name, frame)
         except KeyError:
             return
 

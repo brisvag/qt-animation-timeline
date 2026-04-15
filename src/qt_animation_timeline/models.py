@@ -307,6 +307,21 @@ class Animation(EventedModel):
         self._update_bound_models()
         return kf
 
+    def add_keyframe_from_state(
+        self,
+        track_name: str,
+        t: int,
+        easing: EasingFunction = EasingFunction.Linear,
+    ) -> Keyframe:
+        """Add a keyframe at frame t with value from the current state."""
+        track = self.get_track(track_name)
+        if track is None:
+            raise KeyError(f"Track {track_name} does not exist.")
+        model, attr = self.track_options[track_name]
+        value = model if attr == "" else getattr(model, attr)
+
+        return self.add_keyframe(track_name, t, value, easing)
+
     def remove_keyframe(
         self,
         track_name: str,
