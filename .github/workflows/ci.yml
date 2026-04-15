@@ -42,6 +42,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
 
+      - name: Setup headless display
+        uses: pyvista/setup-headless-display-action@5bc8de3bc71fcda7a96439571287a554901541a0 # v4.3
+        with:
+          qt: true
+          wm: herbstluftwm
+
       - name: Install Dependencies
         run: uv sync --no-dev --group test
 
