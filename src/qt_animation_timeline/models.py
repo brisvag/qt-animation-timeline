@@ -28,34 +28,47 @@ class PlayMode(int, Enum):
 _UNSET = object()
 
 
+def _nested_to_dict(obj):
+    if isinstance(obj, dict):
+        return {k: _nested_to_dict(v) for k, v in obj.items()}
+    elif _is_model_container(obj):
+        return [_nested_to_dict(el) for el in obj]
+    return _to_dict(obj)
+
+
 def _to_dict(obj: Any) -> dict[str, Any]:
+    d = None
     # must make a copy to not change the original value
     if isinstance(obj, dict):
-        return dict(obj)
-    if hasattr(obj, "model_dump"):
-        return obj.model_dump()
-    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        return {f.name: getattr(obj, f.name) for f in dataclasses.fields(obj)}
-    if hasattr(obj, "dict"):
-        return obj.dict()
-    warnings.warn(
-        f"object of type {type(obj)} could not be converted to dict.", stacklevel=2
-    )
-    return {}
+        d = dict(obj)
+    elif hasattr(obj, "model_dump"):
+        d = obj.model_dump()
+    elif dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        d = {f.name: getattr(obj, f.name) for f in dataclasses.fields(obj)}
+    elif hasattr(obj, "dict"):
+        d = obj.dict()
+    # special napari case. TODO: make it use dict in napari?
+    elif hasattr(obj, "_get_state"):
+        d = obj._get_state()
+    # again special case: model_dump should be recursive, but napari
+    # returns whole layers from containers (cause they're not models)
+    if d is not None:
+        return _nested_to_dict(d)
+
+    return obj
 
 
 def _is_model_or_dataclass(obj: Any) -> bool:
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return True
-    return hasattr(obj, "model_dump") or (
+    if hasattr(obj, "model_dump") or (
         hasattr(obj, "dict") and hasattr(obj, "__fields__")
-    )
-
-
-def _is_model_container(obj: Any) -> bool:
-    return _is_collection(obj) and all(
-        _is_model_container(el) or _is_model_or_dataclass(el) for el in obj
-    )
+    ):
+        return True
+    # special napari case for non-model models (ugh)
+    if hasattr(obj, "_get_state"):
+        return True
+    return False
 
 
 def _is_frozen_field(obj: Any, field: str) -> bool:
@@ -68,9 +81,14 @@ def _is_frozen_field(obj: Any, field: str) -> bool:
     return False
 
 
+def _is_model_container(obj: Any) -> bool:
+    return _is_collection(obj) and all(
+        _is_model_container(el) or _is_model_or_dataclass(el) for el in obj
+    )
+
+
 def _update_container_models(obj: Iterable, data: Iterable):
     try:
-        print(f"doing {obj}")
         for el_old, el_new in zip(obj, data, strict=False):
             _update_model_inplace(el_old, el_new)
     except:
@@ -98,14 +116,14 @@ def _update_model_inplace(target: Any, data: dict) -> None:
                 new_val = data_copy.pop(key)
                 if _is_model_or_dataclass(current):
                     _update_model_inplace(current, new_val)
-                if _is_model_container(current):
+                elif _is_model_container(current):
                     _update_container_models(current, new_val)
                 # if it's neither a model nor a container of models, leave it alone
             elif update_method is None:
                 new_val = data_copy.pop(key)
                 setattr(target, key, new_val)
-        except (AttributeError, TypeError):
-            warnings.warn(f"setting values to {target} failed ()", stacklevel=2)
+        except (AttributeError, TypeError) as e:
+            warnings.warn(f"setting values to {target} failed:\n{e}", stacklevel=2)
             pass
 
     if update_method is not None:
