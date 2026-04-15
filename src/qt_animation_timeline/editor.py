@@ -1023,8 +1023,7 @@ class AnimationTimelineWidget(QWidget):
     def toggle_playback(self) -> None:
         if not self._frame_iterator:
             interval = max(1, int(1000 / (self.animation.play_fps)))
-            start, stop = (0, None) if self._play_range is None else self._play_range
-            self._frame_iterator = self.animation.iter_frames(start, stop)
+            self._frame_iterator = self.animation.iter_frames(self._play_range)
             self._play_timer.start(interval)
         else:
             self._frame_iterator = None
