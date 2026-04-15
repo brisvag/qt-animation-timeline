@@ -346,25 +346,22 @@ class Animation(EventedModel):
             else:
                 setattr(model, field, value)
 
-    def iter_frames(self, start=0, end=None, direction=1):
-        if end is None:
-            end = self.n_frames if direction == 1 else 0
-        if (end - start) / direction < 0:
-            raise ValueError("direction does not match start and stop positions.")
-        if end - start == 0:
+    def iter_frames(self, play_range: tuple[int, int] | None = None):
+        if self.n_frames == 0:
             return
-
-        # more convenient to always work with ordered bounds
-        if end < start:
-            start, end = end, start
-            direction *= -1
-            frame = end
+        if play_range is None:
+            start, end = 0, self.n_frames
         else:
-            frame = start
+            start, end = sorted(play_range)
+            start = max(0, start)
+            end = min(self.n_frames, end)
+
+        frame = start
 
         self.current_frame = frame
-        yield
+        yield self.current_frame
 
+        direction = 1
         while True:
             frame = frame + direction
             if frame > end:

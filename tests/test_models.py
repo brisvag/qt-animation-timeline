@@ -37,7 +37,7 @@ def test_track():
         t.add_keyframe(10)
     t.add_keyframe(30)
     t.add_keyframe(5)
-    assert [k.t for k in t.keyframes_sorted()] == [5, 10, 30]
+    assert [k.t for k in t.keyframes] == [5, 10, 30]
 
 
 def test_add_track(animation):
@@ -56,10 +56,11 @@ def test_play_normal_stops_at_last_keyframe(animation):
     animation.tracks[0].add_keyframe(0, value=0.0)
     animation.tracks[0].add_keyframe(5, value=1.0)
     animation.play_mode = PlayMode.NORMAL
-    animation.playing = True
-    animation.current_frame = 5
-    animation.advance_playhead()
-    assert not animation.playing and animation.current_frame == 5
+    iterator = animation.iter_frames()
+    for i in range(5 + 1):
+        assert next(iterator) == i
+    with pytest.raises(StopIteration):
+        next(iterator)
 
 
 def test_play_loop_wraps(animation):
@@ -67,9 +68,11 @@ def test_play_loop_wraps(animation):
     animation.tracks[0].add_keyframe(0, value=0.0)
     animation.tracks[0].add_keyframe(5, value=1.0)
     animation.play_mode = PlayMode.LOOP
-    animation.current_frame = 5
-    animation.advance_playhead()
-    assert animation.current_frame == 0
+    iterator = animation.iter_frames()
+    for i in range(5 + 1):
+        assert next(iterator) == i
+    for i in range(5 + 1):
+        assert next(iterator) == i
 
 
 def test_play_pingpong_reverses(animation):
@@ -77,17 +80,8 @@ def test_play_pingpong_reverses(animation):
     animation.tracks[0].add_keyframe(0, value=0.0)
     animation.tracks[0].add_keyframe(5, value=1.0)
     animation.play_mode = PlayMode.PINGPONG
-    animation.play_direction = 1
-    animation.current_frame = 5
-    animation.advance_playhead()
-    assert animation.play_direction == -1
-    animation.current_frame = 0
-    animation.advance_playhead()
-    assert animation.play_direction == 1
-
-
-def test_play_no_keyframes(animation):
-    animation.play_mode = PlayMode.NORMAL
-    animation.playing = True
-    animation.advance_playhead()
-    assert not animation.playing
+    iterator = animation.iter_frames()
+    for i in range(5 + 1):
+        assert next(iterator) == i
+    for i in range(1, 5):
+        assert next(iterator) == 5 - i
