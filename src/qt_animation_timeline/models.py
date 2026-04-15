@@ -161,6 +161,7 @@ class Animation(EventedModel):
     play_mode: PlayMode = PlayMode.NORMAL
     play_fps: Annotated[int, Field(gt=0)] = 30
 
+    # TODO: ideally would be nested events emitted from children?
     track_added: ClassVar[Signal] = Signal(object)
     track_removed: ClassVar[Signal] = Signal(object)
     track_renamed: ClassVar[Signal] = Signal(object)
@@ -340,7 +341,16 @@ class Animation(EventedModel):
                 continue
 
             model, field = self.track_options[track.name]
-            original = getattr(model, field)
+            if field == "":
+                # whole model should be updated
+                if not _is_model_or_dataclass(model):
+                    raise ValueError(
+                        "To update a whole object, you must pass a model or dataclass."
+                    )
+                original = model
+            else:
+                original = getattr(model, field)
+
             if _is_model_or_dataclass(original):
                 _update_model_inplace(original, value)
             else:

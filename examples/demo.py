@@ -57,15 +57,15 @@ def main() -> None:
             "cam_x": (camera, "x"),
             "cam_y": (camera, "y"),
             "cam_zoom": (camera, "zoom"),
-            # note that angles is a whole model itself!
-            "light_angles": (light, "angles"),
+            # note that light is a whole model itself!
+            "light": (light, ""),
         }
     )
 
     timeline.add_track("cam_x")
     timeline.add_track("cam_y")
     timeline.add_track("cam_zoom")
-    timeline.add_track("light_angles")
+    timeline.add_track("light")
 
     # Camera.x - starts at frame 20 to demonstrate non-zero origins.
     timeline.animation.tracks[0].add_keyframe(20, value=50.0)
@@ -85,19 +85,28 @@ def main() -> None:
     timeline.animation.tracks[2].add_keyframe(200, value=1.0)
 
     # Light — whole pydantic model; each field is interpolated independently.
-    timeline.animation.tracks[3].add_keyframe(0, value=Angles(x=0.0, y=0.0, z=0.0))
+    timeline.animation.tracks[3].add_keyframe(
+        0, value=Light(intensity=0.5, angles=Angles(x=0.0, y=0.0, z=0.0))
+    )
     timeline.animation.tracks[3].add_keyframe(
         150,
-        value=Angles(x=45.0, y=90.0, z=0.0),
+        value=Light(intensity=0.2, angles=Angles(x=45.0, y=90.0, z=0.0)),
         easing=EasingFunction.Step,
     )
-    timeline.animation.tracks[3].add_keyframe(300, value=Angles(x=10.0, y=20.0, z=30.0))
+    timeline.animation.tracks[3].add_keyframe(
+        300, value=Light(intensity=0.8, angles=Angles(x=10.0, y=20.0, z=30.0))
+    )
 
     def _print_state() -> None:
         frame = timeline.animation.current_frame
         print(f"{frame=}\n{camera=}\n{light=}")
 
     timeline.animation.events.connect(_print_state)
+    timeline.animation.track_removed.connect(_print_state)
+    timeline.animation.keyframes_added.connect(_print_state)
+    timeline.animation.keyframes_removed.connect(_print_state)
+    timeline.animation.keyframes_moved.connect(_print_state)
+    timeline.animation.easing_changed.connect(_print_state)
 
     timeline.resize(1200, 200)
     timeline.setWindowTitle("AnimationTimelineWidget - demo (Camera + Light)")
