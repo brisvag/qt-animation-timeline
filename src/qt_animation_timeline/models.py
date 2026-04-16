@@ -50,8 +50,10 @@ def _to_dict(obj: Any) -> dict[str, Any]:
     elif hasattr(obj, "dict"):
         d = obj.dict()
     # special napari case. TODO: make it use dict in napari?
-    elif hasattr(obj, "_get_state"):
-        d = obj._get_state()
+    with warnings.catch_warnings():
+        warnings.filterwarnings(action="ignore", message="Private attribute")
+        if d is None and hasattr(obj, "_get_state"):
+            d = obj._get_state()
     # again special case: model_dump should be recursive, but napari
     # returns whole layers from containers (cause they're not models)
     if d is not None:
@@ -68,8 +70,10 @@ def _is_model_or_dataclass(obj: Any) -> bool:
     ):
         return True
     # special napari case for non-model models (ugh)
-    if hasattr(obj, "_get_state"):
-        return True
+    with warnings.catch_warnings():
+        warnings.filterwarnings(action="ignore", message="Private attribute")
+        if hasattr(obj, "_get_state"):
+            return True
     return False
 
 
