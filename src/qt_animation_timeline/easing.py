@@ -322,7 +322,7 @@ class EasingFunction(Enum):
     @staticmethod
     def get_allowed_easings(value):
         """Get the allowed easings for the given value depending on type."""
-        if isinstance(value, str | bool):
+        if isinstance(value, str | bool | Enum | NoneType):
             return [EasingFunction.Step]
         return list(EasingFunction)
 

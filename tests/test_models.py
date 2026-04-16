@@ -47,14 +47,14 @@ def test_add_track(animation):
     track = animation.add_track("A")
     assert isinstance(track, Track)
     assert track.name == "A"
-    assert track in animation.tracks
+    assert animation.tracks.get("A") is track
     assert received == [track]
 
 
 def test_play_normal_stops_at_last_keyframe(animation):
     animation.add_track("A")
-    animation.tracks[0].add_keyframe(0, value=0.0)
-    animation.tracks[0].add_keyframe(5, value=1.0)
+    animation.tracks["A"].add_keyframe(0, value=0.0)
+    animation.tracks["A"].add_keyframe(5, value=1.0)
     animation.play_mode = PlayMode.NORMAL
     iterator = animation.iter_frames()
     for i in range(5 + 1):
@@ -65,8 +65,8 @@ def test_play_normal_stops_at_last_keyframe(animation):
 
 def test_play_loop_wraps(animation):
     animation.add_track("A")
-    animation.tracks[0].add_keyframe(0, value=0.0)
-    animation.tracks[0].add_keyframe(5, value=1.0)
+    animation.tracks["A"].add_keyframe(0, value=0.0)
+    animation.tracks["A"].add_keyframe(5, value=1.0)
     animation.play_mode = PlayMode.LOOP
     iterator = animation.iter_frames()
     for i in range(5 + 1):
@@ -77,8 +77,8 @@ def test_play_loop_wraps(animation):
 
 def test_play_pingpong_reverses(animation):
     animation.add_track("A")
-    animation.tracks[0].add_keyframe(0, value=0.0)
-    animation.tracks[0].add_keyframe(5, value=1.0)
+    animation.tracks["A"].add_keyframe(0, value=0.0)
+    animation.tracks["A"].add_keyframe(5, value=1.0)
     animation.play_mode = PlayMode.PINGPONG
     iterator = animation.iter_frames()
     for i in range(5 + 1):

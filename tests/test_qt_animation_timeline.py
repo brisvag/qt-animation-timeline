@@ -68,7 +68,7 @@ def test_set_playhead(timeline):
 def test_pos_to_keyframe(timeline):
     timeline.resize(800, 300)
     timeline.add_track("A")
-    timeline.animation.tracks[0].add_keyframe(10)
+    timeline.animation.tracks["A"].add_keyframe(10)
     x, y = timeline.frame_to_x(10), timeline.track_center_y(0)
     assert timeline.pos_to_keyframe(x, y) is not None
     assert timeline.pos_to_keyframe(0, 0) is None
@@ -77,8 +77,8 @@ def test_pos_to_keyframe(timeline):
 def test_keyframes_in_rect(timeline):
     timeline.resize(800, 300)
     timeline.add_track("A")
-    timeline.animation.tracks[0].add_keyframe(10)
-    timeline.animation.tracks[0].add_keyframe(100)
+    timeline.animation.tracks["A"].add_keyframe(10)
+    timeline.animation.tracks["A"].add_keyframe(100)
     cx10 = int(timeline.frame_to_x(10))
     cy = int(timeline.track_center_y(0))
     rect = QRect(cx10 - 20, cy - 20, 40, 40)
@@ -89,7 +89,7 @@ def test_keyframes_in_rect(timeline):
 def test_delete_keyframes(timeline):
     timeline.resize(800, 300)
     timeline.add_track("A")
-    kf = timeline.animation.tracks[0].add_keyframe(10)
+    kf = timeline.animation.tracks["A"].add_keyframe(10)
     timeline.selected_keyframes = [kf]
     removed = []
     timeline.animation.keyframes_removed.connect(removed.append)
@@ -97,23 +97,20 @@ def test_delete_keyframes(timeline):
         QEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier
     )
     timeline.keyPressEvent(press)
-    assert len(timeline.animation.tracks[0].keyframes) == 0
+    assert len(timeline.animation.tracks["A"].keyframes) == 0
     assert removed == [[kf]]
 
 
-def _combo_options(timeline, track_index):
+def _combo_options(timeline, track):
     """Return ``{label: enabled}`` for the track-change combo of a given track."""
-    if not (0 <= track_index < len(timeline.animation.tracks)):
-        return {}
-    track = timeline.animation.tracks[track_index]
     return dict(timeline._get_track_change_options(track))
 
 
 def test_unique_track_options(timeline):
     timeline.animation.track_options = {"A": (object(), "x"), "B": (object(), "y")}
     timeline.add_track("A")
-    timeline.add_track("B")
-    options = _combo_options(timeline, 1)
+    track = timeline.add_track("B")
+    options = _combo_options(timeline, track)
     assert options.get("A") is False  # A is used by track 0 -> disabled for track 1
     assert options.get("B") is True  # B is the current track's own name
 
@@ -135,7 +132,7 @@ def test_rubber_band_selection(timeline):
 
 def test_interpolation(timeline):
     timeline.add_track("A")
-    track = timeline.animation.tracks[0]
+    track = timeline.animation.tracks["A"]
     assert timeline.animation.interpolate_track(track, 50)
 
     kf = track.add_keyframe(10, value=7.0)
@@ -144,44 +141,46 @@ def test_interpolation(timeline):
     assert timeline.animation.interpolate_track(track, 20) == pytest.approx(7.0)
 
     track.remove_keyframe(kf)
-    timeline.animation.tracks[0].add_keyframe(0, value=0.0)
-    timeline.animation.tracks[0].add_keyframe(100, value=10.0)
+    timeline.animation.tracks["A"].add_keyframe(0, value=0.0)
+    timeline.animation.tracks["A"].add_keyframe(100, value=10.0)
     assert timeline.animation.interpolate_track(
-        timeline.animation.tracks[0], 50
+        timeline.animation.tracks["A"], 50
     ) == pytest.approx(5.0)
     assert timeline.animation.interpolate_track(
-        timeline.animation.tracks[0], 0
+        timeline.animation.tracks["A"], 0
     ) == pytest.approx(0.0)
     assert timeline.animation.interpolate_track(
-        timeline.animation.tracks[0], 200
+        timeline.animation.tracks["A"], 200
     ) == pytest.approx(10.0)
 
 
 def test_interpolation_step_easing(timeline):
     timeline.add_track("A")
-    timeline.animation.tracks[0].add_keyframe(0, value=0.0, easing=EasingFunction.Step)
-    timeline.animation.tracks[0].add_keyframe(100, value=1.0)
+    timeline.animation.tracks["A"].add_keyframe(
+        0, value=0.0, easing=EasingFunction.Step
+    )
+    timeline.animation.tracks["A"].add_keyframe(100, value=1.0)
     assert timeline.animation.interpolate_track(
-        timeline.animation.tracks[0], 49
+        timeline.animation.tracks["A"], 49
     ) == pytest.approx(0.0)
     assert timeline.animation.interpolate_track(
-        timeline.animation.tracks[0], 50
+        timeline.animation.tracks["A"], 50
     ) == pytest.approx(1.0)
     assert timeline.animation.interpolate_track(
-        timeline.animation.tracks[0], 100
+        timeline.animation.tracks["A"], 100
     ) == pytest.approx(1.0)
 
 
 def test_segment_left_keyframe(timeline):
     timeline.resize(800, 300)
     timeline.add_track("A")
-    k1 = timeline.animation.tracks[0].add_keyframe(0)
-    timeline.animation.tracks[0].add_keyframe(100)
+    k1 = timeline.animation.tracks["A"].add_keyframe(0)
+    timeline.animation.tracks["A"].add_keyframe(100)
     x = int(timeline.frame_to_x(50))
     y = int(timeline.track_center_y(0))
     assert timeline._segment_left_keyframe_at(x, y) is k1
 
-    k2 = timeline.animation.tracks[0].add_keyframe(50)
+    k2 = timeline.animation.tracks["A"].add_keyframe(50)
     x2 = int(timeline.frame_to_x(80))
     y2 = int(timeline.track_center_y(0))
     assert timeline._segment_left_keyframe_at(x2, y2) is k2
@@ -204,24 +203,26 @@ def test_track_model_dispatch(timeline):
     m = Model()
     timeline.animation.track_options = {"A": (m, "x")}
     timeline.add_track("A")
-    timeline.animation.tracks[0].add_keyframe(0, value=0.0)
-    timeline.animation.tracks[0].add_keyframe(100, value=10.0)
+    timeline.animation.tracks["A"].add_keyframe(0, value=0.0)
+    timeline.animation.tracks["A"].add_keyframe(100, value=10.0)
     timeline._set_playhead(50)
     assert m.x == pytest.approx(5.0)
     timeline.animation.remove_track("A")
 
     timeline.animation.track_options = {"A": (m, "n")}
     timeline.add_track("A")
-    timeline.animation.tracks[0].add_keyframe(0, value=0)
-    timeline.animation.tracks[0].add_keyframe(10, value=10)
+    timeline.animation.tracks["A"].add_keyframe(0, value=0)
+    timeline.animation.tracks["A"].add_keyframe(10, value=10)
     timeline._set_playhead(3)
     assert isinstance(m.n, int) and m.n == 3
     timeline.animation.remove_track("A")
 
     timeline.animation.track_options = {"A": (m, "flag")}
     timeline.add_track("A")
-    timeline.animation.tracks[0].add_keyframe(0, value=0.0, easing=EasingFunction.Step)
-    timeline.animation.tracks[0].add_keyframe(100, value=1.0)
+    timeline.animation.tracks["A"].add_keyframe(
+        0, value=0.0, easing=EasingFunction.Step
+    )
+    timeline.animation.tracks["A"].add_keyframe(100, value=1.0)
     timeline._set_playhead(49)
     assert m.flag == 0
     timeline._set_playhead(50)
@@ -235,8 +236,8 @@ def test_dispatch_on_easing_and_keyframe_change(timeline):
     m = Model()
     timeline.animation.track_options = {"A": (m, "x")}
     timeline.add_track("A")
-    kf = timeline.animation.tracks[0].add_keyframe(0, value=0.0)
-    timeline.animation.tracks[0].add_keyframe(100, value=10.0)
+    kf = timeline.animation.tracks["A"].add_keyframe(0, value=0.0)
+    timeline.animation.tracks["A"].add_keyframe(100, value=10.0)
     timeline._set_playhead(50)
     assert m.x == pytest.approx(5.0)
 
@@ -307,7 +308,7 @@ def test_right_double_click_ignored(timeline):
         Qt.KeyboardModifier.NoModifier,
     )
     timeline.mouseDoubleClickEvent(event)
-    assert len(timeline.animation.tracks[0].keyframes) == 0
+    assert len(timeline.animation.tracks["A"].keyframes) == 0
 
 
 def test_is_on_track_line(timeline):
@@ -333,8 +334,8 @@ def test_is_on_track_line(timeline):
 def test_reset_view(timeline):
     timeline.resize(800, 300)
     timeline.add_track("A")
-    timeline.animation.tracks[0].add_keyframe(0, value=0.0)
-    timeline.animation.tracks[0].add_keyframe(200, value=1.0)
+    timeline.animation.tracks["A"].add_keyframe(0, value=0.0)
+    timeline.animation.tracks["A"].add_keyframe(200, value=1.0)
     timeline._reset_view()
     assert timeline.scroll_x == 0
     assert timeline.frame_to_x(0) == pytest.approx(
@@ -373,10 +374,10 @@ def test_numpy_interpolation(timeline):
 
     timeline.animation.track_options = {"A": (object(), "angles")}
     timeline.add_track("A")
-    timeline.animation.tracks[0].add_keyframe(0, value=np.array([0.0, 0.0]))
-    timeline.animation.tracks[0].add_keyframe(100, value=np.array([10.0, 20.0]))
+    timeline.animation.tracks["A"].add_keyframe(0, value=np.array([0.0, 0.0]))
+    timeline.animation.tracks["A"].add_keyframe(100, value=np.array([10.0, 20.0]))
     np.testing.assert_allclose(
-        timeline.animation.interpolate_track(timeline.animation.tracks[0], 50),
+        timeline.animation.interpolate_track(timeline.animation.tracks["A"], 50),
         [5.0, 10.0],
     )
     timeline.animation.remove_track("A")
@@ -387,8 +388,8 @@ def test_numpy_interpolation(timeline):
     m = Model()
     timeline.animation.track_options = {"A": (m, "angles")}
     timeline.add_track("A")
-    timeline.animation.tracks[0].add_keyframe(0, value=np.array([0.0, 0.0, 0.0]))
-    timeline.animation.tracks[0].add_keyframe(100, value=np.array([10.0, 20.0, 30.0]))
+    timeline.animation.tracks["A"].add_keyframe(0, value=np.array([0.0, 0.0, 0.0]))
+    timeline.animation.tracks["A"].add_keyframe(100, value=np.array([10.0, 20.0, 30.0]))
     timeline._set_playhead(50)
     np.testing.assert_allclose(m.angles, [5.0, 10.0, 15.0])
 
@@ -480,16 +481,16 @@ def test_coerce_value_nested_list(timeline):
 def test_interpolate_list_and_tuple_values(timeline):
     timeline.animation.track_options = {"A": (object(), "x"), "B": (object(), "y")}
     timeline.add_track("A")
-    timeline.animation.tracks[0].add_keyframe(0, value=[0.0, 0.0])
-    timeline.animation.tracks[0].add_keyframe(100, value=[10.0, 20.0])
+    timeline.animation.tracks["A"].add_keyframe(0, value=[0.0, 0.0])
+    timeline.animation.tracks["A"].add_keyframe(100, value=[10.0, 20.0])
     assert timeline.animation.interpolate_track(
-        timeline.animation.tracks[0], 50
+        timeline.animation.tracks["A"], 50
     ) == pytest.approx([5.0, 10.0])
 
     timeline.add_track("B")
-    timeline.animation.tracks[1].add_keyframe(0, value=(0.0, 100.0))
-    timeline.animation.tracks[1].add_keyframe(100, value=(100.0, 0.0))
-    result = timeline.animation.interpolate_track(timeline.animation.tracks[1], 50)
+    timeline.animation.tracks["B"].add_keyframe(0, value=(0.0, 100.0))
+    timeline.animation.tracks["B"].add_keyframe(100, value=(100.0, 0.0))
+    result = timeline.animation.interpolate_track(timeline.animation.tracks["B"], 50)
     np.testing.assert_allclose(result, [50.0, 50.0])
 
 
@@ -501,11 +502,11 @@ def test_dispatch_list_and_tuple_cast_back(timeline):
     m = Model()
     timeline.animation.track_options = {"A": (m, "pos_list"), "B": (m, "pos_tuple")}
     timeline.add_track("A")
-    timeline.animation.tracks[0].add_keyframe(0, value=[0.0, 0.0])
-    timeline.animation.tracks[0].add_keyframe(100, value=[10.0, 20.0])
+    timeline.animation.tracks["A"].add_keyframe(0, value=[0.0, 0.0])
+    timeline.animation.tracks["A"].add_keyframe(100, value=[10.0, 20.0])
     timeline.add_track("B")
-    timeline.animation.tracks[1].add_keyframe(0, value=(0.0, 0.0))
-    timeline.animation.tracks[1].add_keyframe(100, value=(10.0, 20.0))
+    timeline.animation.tracks["B"].add_keyframe(0, value=(0.0, 0.0))
+    timeline.animation.tracks["B"].add_keyframe(100, value=(10.0, 20.0))
     timeline._set_playhead(50)
     assert isinstance(m.pos_list, list) and m.pos_list == pytest.approx([5.0, 10.0])
     assert isinstance(m.pos_tuple, tuple) and m.pos_tuple == pytest.approx((5.0, 10.0))
@@ -527,10 +528,10 @@ def test_dispatch_dataclass(timeline):
     m = Model()
     timeline.animation.track_options = {"A": (m, "state")}
     timeline.add_track("A")
-    timeline.animation.tracks[0].add_keyframe(
+    timeline.animation.tracks["A"].add_keyframe(
         0, value=Pose(x=0.0, y=0.0), easing=EasingFunction.Step
     )
-    timeline.animation.tracks[0].add_keyframe(100, value=Pose(x=10.0, y=20.0))
+    timeline.animation.tracks["A"].add_keyframe(100, value=Pose(x=10.0, y=20.0))
     timeline._set_playhead(50)
     assert m.state is pose  # updated in-place, not replaced
     assert m.state.x == pytest.approx(10.0) and m.state.y == pytest.approx(20.0)
@@ -556,10 +557,10 @@ def test_dispatch_dataclass_skips_properties(timeline):
     m = Model()
     timeline.animation.track_options = {"A": (m, "shape")}
     timeline.add_track("A")
-    timeline.animation.tracks[0].add_keyframe(
+    timeline.animation.tracks["A"].add_keyframe(
         0, value=Rect(timeline=2.0, h=3.0), easing=EasingFunction.Step
     )
-    timeline.animation.tracks[0].add_keyframe(100, value=Rect(timeline=4.0, h=6.0))
+    timeline.animation.tracks["A"].add_keyframe(100, value=Rect(timeline=4.0, h=6.0))
     timeline._set_playhead(50)
     assert m.shape.timeline == pytest.approx(4.0)
 
@@ -584,10 +585,10 @@ def test_dispatch_dataclass_with_update_method(timeline):
     m = Model()
     timeline.animation.track_options = {"A": (m, "config")}
     timeline.add_track("A")
-    timeline.animation.tracks[0].add_keyframe(
+    timeline.animation.tracks["A"].add_keyframe(
         0, value=Config(speed=1.0, enabled=True), easing=EasingFunction.Step
     )
-    timeline.animation.tracks[0].add_keyframe(
+    timeline.animation.tracks["A"].add_keyframe(
         100, value=Config(speed=5.0, enabled=False)
     )
     timeline._set_playhead(50)

@@ -213,7 +213,8 @@ class AnimationTimelineWidget(QWidget):
         """Return a size fitting current tracks and visible keyframe range."""
         n = max(4, len(self.animation.tracks))
         max_frame = max(
-            (kf.t for t in self.animation.tracks for kf in t.keyframes), default=50
+            (kf.t for t in self.animation.tracks.values() for kf in t.keyframes),
+            default=50,
         )
         w = int(
             self._left_margin_min
@@ -244,9 +245,15 @@ class AnimationTimelineWidget(QWidget):
             / self.frame_width
         )
 
-    def y_to_track_index(self, y: float) -> int:
+    def y_to_track(self, y: float) -> Track | None:
         """Convert a pixel y coordinate to a track index (may be out of range)."""
-        return int((y - self.top_margin + self.scroll_y) / self.track_height)
+        idx = int((y - self.top_margin + self.scroll_y) / self.track_height)
+        if 0 <= idx < len(self.animation.tracks):
+            return list(self.animation.tracks.values())[idx]
+        return None
+
+    def track_to_idx(self, track: Track) -> int:
+        return list(self.animation.tracks.values()).index(track)
 
     def track_center_y(self, track_index: int) -> float:
         """Return the pixel y coordinate of the vertical centre of a track row."""
@@ -268,7 +275,8 @@ class AnimationTimelineWidget(QWidget):
         """Recalculate scrollbar ranges based on content size."""
         self._update_left_margin()
         max_frame = max(
-            (kf.t for t in self.animation.tracks for kf in t.keyframes), default=0
+            (kf.t for t in self.animation.tracks.values() for kf in t.keyframes),
+            default=0,
         )
         content_width = self.left_timeline_pad + (max_frame + 20) * self.frame_width
         page_w = self.width() - self.left_margin
@@ -306,7 +314,8 @@ class AnimationTimelineWidget(QWidget):
             return
         metrics = QFontMetrics(self.label_font)
         max_text_w = max(
-            metrics.horizontalAdvance(t.name) for t in self.animation.tracks
+            metrics.horizontalAdvance(track_name)
+            for track_name in self.animation.tracks
         )
         self.left_margin = max(self._left_margin_min, 40 + max_text_w + 10)
 
@@ -347,7 +356,7 @@ class AnimationTimelineWidget(QWidget):
             self.width() - self.left_margin,
             self.height() - self.top_margin,
         )
-        for i, track in enumerate(self.animation.tracks):
+        for i, track in enumerate(self.animation.tracks.values()):
             self.draw_track(painter, i, track)
         if self._box_rect is not None:
             self._draw_rubber_band(painter)
@@ -444,7 +453,7 @@ class AnimationTimelineWidget(QWidget):
 
     def _draw_labels(self, painter: QPainter, metrics: QFontMetrics) -> None:
         btn_size = 14
-        for i, track in enumerate(self.animation.tracks):
+        for i, track in enumerate(self.animation.tracks.values()):
             y = self.top_margin + i * self.track_height - self.scroll_y
             if y < -self.track_height or y > self.height():
                 continue
@@ -588,9 +597,9 @@ class AnimationTimelineWidget(QWidget):
             return
 
         if self._is_on_track_line(x, y):
-            track_index = self.y_to_track_index(y)
-            if 0 <= track_index < len(self.animation.tracks):
-                self._dragging_track = self.animation.tracks[track_index]
+            track = self.y_to_track(y)
+            if track is not None:
+                self._dragging_track = track
                 self._track_drag_x = x
                 return
 
@@ -609,12 +618,11 @@ class AnimationTimelineWidget(QWidget):
 
     def _handle_label_click(self, x: int, y: int, global_pos: object) -> None:
         """Handle a left-click inside the label column (remove / add buttons)."""
-        for i in range(len(self.animation.tracks)):
+        for i, track in enumerate(self.animation.tracks.values()):
             ty = self.top_margin + i * self.track_height - self.scroll_y
             btn_size = 14
             by = ty + (self.track_height - btn_size) // 2
             if 8 <= x <= 8 + btn_size and by <= y <= by + btn_size:
-                track = self.animation.tracks[i]
                 self.animation.remove_track(track.name)
                 return
 
@@ -711,7 +719,7 @@ class AnimationTimelineWidget(QWidget):
     def _keyframes_in_rect(self, rect: QRect) -> list[Keyframe]:
         """Return all keyframes whose centre point lies within *rect*."""
         result = []
-        for i, track in enumerate(self.animation.tracks):
+        for i, track in enumerate(self.animation.tracks.values()):
             cy = int(self.track_center_y(i))
             for kf in track.keyframes:
                 cx = int(self.frame_to_x(kf.t))
@@ -753,12 +761,11 @@ class AnimationTimelineWidget(QWidget):
         if x < self.left_margin or y < self.top_margin:
             return
 
-        track_index = self.y_to_track_index(y)
-        if not (0 <= track_index < len(self.animation.tracks)):
+        track = self.y_to_track(y)
+        if track is None:
             return
 
         frame = max(0, self.x_to_frame(x))
-        track = self.animation.tracks[track_index]
 
         try:
             self.animation.add_keyframe_from_state(track.name, frame)
@@ -767,10 +774,11 @@ class AnimationTimelineWidget(QWidget):
 
     def pos_to_keyframe(self, x: float, y: float) -> Keyframe | None:
         """Return the keyframe at screen position *(x, y)*, or ``None``."""
-        track_index = self.y_to_track_index(y)
-        if not (0 <= track_index < len(self.animation.tracks)):
+        track = self.y_to_track(y)
+        if track is None:
             return None
-        track = self.animation.tracks[track_index]
+
+        track_index = self.track_to_idx(track)
         cy = self.track_center_y(track_index)
         for kf in track.keyframes:
             kx = self.frame_to_x(kf.t)
@@ -793,19 +801,15 @@ class AnimationTimelineWidget(QWidget):
         Returns the keyframe that starts the segment, or the last keyframe when
         clicking past all keyframes.  Returns ``None`` when the track is empty.
         """
-        track_index = self.y_to_track_index(y)
-        if not (0 <= track_index < len(self.animation.tracks)):
-            return None
-        track = self.animation.tracks[track_index]
-        kfs = track.keyframes
-        if not kfs:
+        track = self.y_to_track(y)
+        if track is None or not track.keyframes:
             return None
         frame = self.x_to_frame(x)
-        for k1, k2 in itertools.pairwise(kfs):
+        for k1, k2 in itertools.pairwise(track.keyframes):
             if k1.t <= frame <= k2.t:
                 return k1
-        if frame > kfs[-1].t:
-            return kfs[-1]
+        if frame > track.keyframes[-1].t:
+            return track.keyframes[-1]
         return None
 
     def _get_allowed_easings_for_track(self, track: Track) -> list[EasingFunction]:
@@ -823,18 +827,18 @@ class AnimationTimelineWidget(QWidget):
 
     def _is_on_track_line(self, x: int, y: int) -> bool:
         """Return ``True`` if *(x, y)* is near an existing track line."""
-        track_index = self.y_to_track_index(y)
-        if not (0 <= track_index < len(self.animation.tracks)):
+        track = self.y_to_track(y)
+        if track is None:
             return False
         # do not grab if outside if before or after the last keyframe
-        track_frames = self.animation.tracks[track_index].keyframes
         frame = self.x_to_frame(x)
         if (
-            len(track_frames) < 2
-            or frame < track_frames[0].t
-            or frame > track_frames[-1].t
+            len(track.keyframes) < 2
+            or frame < track.keyframes[0].t
+            or frame > track.keyframes[-1].t
         ):
             return False
+        track_index = self.track_to_idx(track)
         cy = self.track_center_y(track_index)
         return abs(y - cy) <= self.line_thickness + 4
 
@@ -852,21 +856,14 @@ class AnimationTimelineWidget(QWidget):
         if kf is None:
             return
 
-        track_index = self.y_to_track_index(y)
-        track = (
-            self.animation.tracks[track_index]
-            if 0 <= track_index < len(self.animation.tracks)
-            else None
-        )
-        allowed = (
-            self._get_allowed_easings_for_track(track)
-            if track is not None
-            else list(EasingFunction)
-        )
+        track = self.y_to_track(y)
+        if track is None:
+            return
 
         targets = self.selected_keyframes if kf in self.selected_keyframes else [kf]
         menu = QMenu(self)
 
+        allowed = self._get_allowed_easings_for_track(track)
         for ef in allowed:
             action = menu.addAction(ef.name)
             action.setCheckable(True)
@@ -886,7 +883,9 @@ class AnimationTimelineWidget(QWidget):
 
         Options already used by *other* tracks are disabled to enforce uniqueness.
         """
-        used_by_others = {t.name for t in self.animation.tracks if t is not track}
+        used_by_others = {
+            t.name for t in self.animation.tracks.values() if t is not track
+        }
         return [
             (opt, opt not in used_by_others) for opt in self.animation.track_options
         ]
@@ -896,11 +895,10 @@ class AnimationTimelineWidget(QWidget):
 
         Options already used by other tracks are disabled to enforce uniqueness.
         """
-        track_index = self.y_to_track_index(y)
-        if not (0 <= track_index < len(self.animation.tracks)):
+        track = self.y_to_track(y)
+        if track is None:
             return
 
-        track = self.animation.tracks[track_index]
         options = self._get_track_change_options(track)
 
         container = QWidget(
@@ -950,7 +948,7 @@ class AnimationTimelineWidget(QWidget):
         click an item or type a search term and press Enter to add the first
         matching (highlighted) item.
         """
-        used = {t.name for t in self.animation.tracks}
+        used = set(self.animation.tracks)
         available = [name for name in self.animation.track_options if name not in used]
         if not available:
             return
@@ -1062,7 +1060,8 @@ class AnimationTimelineWidget(QWidget):
         timeline width.
         """
         max_frame = max(
-            (kf.t for t in self.animation.tracks for kf in t.keyframes), default=0
+            (kf.t for t in self.animation.tracks.values() for kf in t.keyframes),
+            default=0,
         )
         buffer = max(10, max_frame // 10)
         total_frames = max_frame + buffer

@@ -229,7 +229,7 @@ class Animation(EventedModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
 
     track_options: dict[str, tuple[Any, str]] = Field(default_factory=dict)
-    tracks: list[Track] = Field(default_factory=list)
+    tracks: dict[str, Track] = Field(default_factory=dict)
 
     current_frame: Annotated[int, Field(ge=0)] = 0
     play_mode: PlayMode = PlayMode.NORMAL
@@ -251,44 +251,37 @@ class Animation(EventedModel):
         super().__init__(**data)
         self.events.current_frame.connect(self._update_bound_models)
 
-    def get_track(self, name: str) -> Track | None:
-        for track in self.tracks:
-            if track.name == name:
-                return track
-        return None
-
     def add_track(self, name: str, color: Color | None = None) -> Track:
         """Add a new track."""
         if name not in self.track_options:
             raise KeyError(
                 f"Track {name} is not allowed. Options are: {tuple(self.track_options)}"
             )
-        track = self.get_track(name)
-        if track is not None:
-            raise KeyError(f"Track {name} already exists.")
         track = Track(name=name, color=color or Color((180, 180, 180)))
-        self.tracks.append(track)
+        self.tracks[name] = track
         self.track_added(track)
         return track
 
-    def remove_track(self, name: str) -> None:
+    def remove_track(self, name: str) -> Track:
         """Remove *track*."""
-        track = self.get_track(name)
-        if track is None:
-            raise KeyError(f"Track {name} does not exist.")
-        self.tracks.remove(track)
+        track = self.tracks.pop(name)
         self.track_removed(track)
+        return track
 
-    def rename_track(self, old_name: str, new_name: str) -> None:
+    def rename_track(self, name: str, new_name: str) -> None:
         """Rename a track option key and any existing track with that name."""
-        if old_name == new_name:
+        if name not in self.track_options:
+            raise KeyError(
+                f"Track {name} is not allowed. Options are: {tuple(self.track_options)}"
+            )
+        if name == new_name:
             return
-        if old_name in self.track_options:
-            self.track_options[new_name] = self.track_options.pop(old_name)
 
-        track = self.get_track(old_name)
+        self.track_options[new_name] = self.track_options.pop(name)
+        track = self.tracks.pop(name)
         if track is not None:
             track.name = new_name
+            self.tracks[new_name] = track
         self.track_renamed(track)
 
     def add_keyframe(
@@ -299,9 +292,7 @@ class Animation(EventedModel):
         easing: EasingFunction = EasingFunction.Linear,
     ) -> Keyframe:
         """Add a keyframe to track."""
-        track = self.get_track(track_name)
-        if track is None:
-            raise KeyError(f"Track {track_name} does not exist.")
+        track = self.tracks[track_name]
         kf = track.add_keyframe(t, value, easing)
         self.keyframes_added([kf])
         self._update_bound_models()
@@ -314,9 +305,8 @@ class Animation(EventedModel):
         easing: EasingFunction = EasingFunction.Linear,
     ) -> Keyframe:
         """Add a keyframe at frame t with value from the current state."""
-        track = self.get_track(track_name)
-        if track is None:
-            raise KeyError(f"Track {track_name} does not exist.")
+        if track_name not in self.tracks:
+            self.add_track(track_name)
         model, attr = self.track_options[track_name]
         value = model if attr == "" else getattr(model, attr)
 
@@ -327,16 +317,14 @@ class Animation(EventedModel):
         track_name: str,
         t: int,
     ) -> Keyframe:
-        track = self.get_track(track_name)
-        if track is None:
-            raise KeyError(f"Track {track_name} does not exist.")
+        track = self.tracks[track_name]
         kf = track.remove_keyframe(t)
         self.keyframes_removed([kf])
         self._update_bound_models()
         return kf
 
     def _get_kf_track(self, kf: Keyframe) -> Track:
-        for track in self.tracks:
+        for track in self.tracks.values():
             for kf_ in track.keyframes:
                 if kf is kf_:
                     return track
@@ -409,7 +397,7 @@ class Animation(EventedModel):
     @property
     def n_frames(self):
         max_frame = 0
-        for tr in self.tracks:
+        for tr in self.tracks.values():
             for kf in tr.keyframes:
                 max_frame = max(max_frame, kf.t)
         return max_frame
@@ -424,12 +412,12 @@ class Animation(EventedModel):
         When the bound field is itself a model/dataclass the interpolated dict
         is applied in-place.
         """
-        for track in self.tracks:
+        for name, track in self.tracks.items():
             value = self.interpolate_track(track, self.current_frame)
             if value is _UNSET:
                 continue
 
-            model, field = self.track_options[track.name]
+            model, field = self.track_options[name]
             if field == "":
                 # whole model should be updated
                 if not _is_model_or_dataclass(model):

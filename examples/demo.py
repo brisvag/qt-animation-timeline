@@ -62,38 +62,34 @@ def main() -> None:
         }
     )
 
-    timeline.add_track("cam_x")
-    timeline.add_track("cam_y")
-    timeline.add_track("cam_zoom")
-    timeline.add_track("light")
+    cam_x = timeline.add_track("cam_x")
+    cam_y = timeline.add_track("cam_y")
+    cam_zoom = timeline.add_track("cam_zoom")
+    light = timeline.add_track("light")
 
-    # Camera.x - starts at frame 20 to demonstrate non-zero origins.
-    timeline.animation.tracks[0].add_keyframe(20, value=50.0)
-    timeline.animation.tracks[0].add_keyframe(100, value=200.0)
-    timeline.animation.tracks[0].add_keyframe(200, value=50.0)
+    cam_x.add_keyframe(20, value=50.0)
+    cam_x.add_keyframe(100, value=200.0)
+    cam_x.add_keyframe(200, value=50.0)
 
-    # Camera.y
-    timeline.animation.tracks[1].add_keyframe(0, value=0.0)
-    timeline.animation.tracks[1].add_keyframe(
-        150, value=100.0, easing=EasingFunction.Step
-    )
-    timeline.animation.tracks[1].add_keyframe(300, value=0.0)
+    cam_y.add_keyframe(0, value=0.0)
+    cam_y.add_keyframe(150, value=100.0, easing=EasingFunction.Step)
+    cam_y.add_keyframe(300, value=0.0)
 
     # Camera.zoom
-    timeline.animation.tracks[2].add_keyframe(0, value=1.0)
-    timeline.animation.tracks[2].add_keyframe(100, value=2.5)
-    timeline.animation.tracks[2].add_keyframe(200, value=1.0)
+    cam_zoom.add_keyframe(0, value=1.0)
+    cam_zoom.add_keyframe(100, value=2.5)
+    cam_zoom.add_keyframe(200, value=1.0)
 
     # Light — whole pydantic model; each field is interpolated independently.
-    timeline.animation.tracks[3].add_keyframe(
+    light.add_keyframe(
         0, value=Light(intensity=0.5, angles=Angles(x=0.0, y=0.0, z=0.0))
     )
-    timeline.animation.tracks[3].add_keyframe(
+    light.add_keyframe(
         150,
         value=Light(intensity=0.2, angles=Angles(x=45.0, y=90.0, z=0.0)),
         easing=EasingFunction.Step,
     )
-    timeline.animation.tracks[3].add_keyframe(
+    light.add_keyframe(
         300, value=Light(intensity=0.8, angles=Angles(x=10.0, y=20.0, z=30.0))
     )
 
