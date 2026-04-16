@@ -123,6 +123,7 @@ class AnimationTimelineWidget(QWidget):
         track_color_cycle: list[QColor] | None = None,
         track_options: dict[str, tuple[Any, str]] | None = None,
         play_fps: int = 30,
+        animation: Animation | None = None,
         **color_kwargs: QColor,
     ) -> None:
         super().__init__(parent)
@@ -147,11 +148,12 @@ class AnimationTimelineWidget(QWidget):
             else list(_DEFAULT_TRACK_COLORS)
         )
 
-        self.animation: Animation = Animation(
-            track_options=track_options if track_options is not None else {},
-            play_fps=play_fps,
-        )
-
+        if animation is None:
+            animation = Animation(
+                track_options=track_options if track_options is not None else {},
+                play_fps=play_fps,
+            )
+        self.animation: Animation = animation
         self.selected_keyframes: list[Keyframe] = []
         self._drag_pivot: Keyframe | None = None
         self._drag_offset: int = 0
@@ -457,7 +459,7 @@ class AnimationTimelineWidget(QWidget):
             y = self.top_margin + i * self.track_height - self.scroll_y
             if y < -self.track_height or y > self.height():
                 continue
-            painter.setPen(QColor(*track.color.as_rgb_tuple()))
+            painter.setPen(self._track_color(track))
             painter.drawText(
                 40,
                 y + self.track_height // 2 + metrics.ascent() // 2,
@@ -522,7 +524,7 @@ class AnimationTimelineWidget(QWidget):
     def draw_track(self, painter: QPainter, index: int, track: Track) -> None:
         """Draw the connecting line and all keyframes for *track*."""
         cy = int(self.track_center_y(index))
-        track_color = QColor(*track.color.as_rgb_tuple())
+        track_color = self._track_color(track)
         kfs = track.keyframes
 
         if len(kfs) >= 2:
@@ -545,7 +547,7 @@ class AnimationTimelineWidget(QWidget):
         x = self.frame_to_x(kf.t)
         y = self.track_center_y(track_index)
         selected = kf in self.selected_keyframes
-        painter.setBrush(QColor(*track.color.as_rgb_tuple()))
+        painter.setBrush(self._track_color(track))
         if selected:
             painter.setPen(QPen(self.keyframe_selected_border_color, 2))
         else:
@@ -1088,6 +1090,10 @@ class AnimationTimelineWidget(QWidget):
     def _can_add_track(self) -> bool:
         return len(self.animation.tracks) < len(self.animation.track_options)
 
+    def _track_color(self, track: Track) -> QColor:
+        idx = self.track_to_idx(track)
+        return self.track_color_cycle[idx % len(self.track_color_cycle)]
+
     def add_track(self, name: str, color: tuple[int, int, int] | None = None) -> Track:
         """Add a new track with an auto-assigned colour and return it."""
         if color is None:
@@ -1103,4 +1109,4 @@ class AnimationTimelineWidget(QWidget):
                 if qcolor
                 else (180, 180, 180)
             )
-        return self.animation.add_track(name, color)
+        return self.animation.add_track(name)

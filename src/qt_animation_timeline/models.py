@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 from psygnal import Signal
 from psygnal._evented_model import EventedModel
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from pydantic_extra_types.color import Color
 
 from qt_animation_timeline.easing import EasingFunction, _is_collection
 
@@ -159,12 +158,11 @@ class Keyframe(BaseModel):
 
 
 class Track(BaseModel):
-    """A named, colored animation track holding a set of keyframes."""
+    """A named animation track holding a set of keyframes."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
 
     name: str
-    color: Color = Color((180, 180, 180))
     keyframes: list = Field(default_factory=list)
 
     def add_keyframe(
@@ -251,13 +249,13 @@ class Animation(EventedModel):
         super().__init__(**data)
         self.events.current_frame.connect(self._update_bound_models)
 
-    def add_track(self, name: str, color: Color | None = None) -> Track:
+    def add_track(self, name: str) -> Track:
         """Add a new track."""
         if name not in self.track_options:
             raise KeyError(
                 f"Track {name} is not allowed. Options are: {tuple(self.track_options)}"
             )
-        track = Track(name=name, color=color or Color((180, 180, 180)))
+        track = Track(name=name)
         self.tracks[name] = track
         self.track_added(track)
         return track

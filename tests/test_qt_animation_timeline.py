@@ -5,7 +5,6 @@ from typing import ClassVar
 import numpy as np
 import pytest
 from pydantic import BaseModel
-from pydantic_extra_types.color import Color
 from qtpy.QtCore import QEvent, QPointF, QRect, Qt
 from qtpy.QtGui import QColor, QKeyEvent, QMouseEvent
 from qtpy.QtWidgets import QApplication
@@ -53,7 +52,7 @@ def test_track_color_cycle(timeline):
     red = QColor(255, 0, 0)
     timeline.track_color_cycle = [red]
     track = timeline.add_track("A")
-    assert track.color == Color((255, 0, 0))
+    assert timeline._track_color(track) == QColor(255, 0, 0)
 
 
 def test_set_playhead(timeline):
