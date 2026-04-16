@@ -44,75 +44,74 @@ class Light(EventedModel):
     angles: Angles = Angles()
 
 
-def main() -> None:
-    """Run the demo application."""
+camera = Camera()
+
+light = Light()
+
+animation = AnimationTimeline(
+    track_options={
+        "cam_x": (camera, "x"),
+        "cam_y": (camera, "y"),
+        "cam_zoom": (camera, "zoom"),
+        # note that light is a whole model itself!
+        "light": (light, ""),
+    }
+)
+
+cam_x = animation.add_track("cam_x")
+cam_y = animation.add_track("cam_y")
+cam_zoom = animation.add_track("cam_zoom")
+light = animation.add_track("light")
+
+cam_x.add_keyframe(20, value=50.0)
+cam_x.add_keyframe(100, value=200.0)
+cam_x.add_keyframe(200, value=50.0)
+
+cam_y.add_keyframe(0, value=0.0)
+cam_y.add_keyframe(150, value=100.0, easing=EasingFunction.Step)
+cam_y.add_keyframe(300, value=0.0)
+
+# Camera.zoom
+cam_zoom.add_keyframe(0, value=1.0)
+cam_zoom.add_keyframe(100, value=2.5)
+cam_zoom.add_keyframe(200, value=1.0)
+
+# Light — whole pydantic model; each field is interpolated independently.
+light.add_keyframe(0, value=Light(intensity=0.5, angles=Angles(x=0.0, y=0.0, z=0.0)))
+light.add_keyframe(
+    150,
+    value=Light(intensity=0.2, angles=Angles(x=45.0, y=90.0, z=0.0)),
+    easing=EasingFunction.Step,
+)
+light.add_keyframe(
+    300, value=Light(intensity=0.8, angles=Angles(x=10.0, y=20.0, z=30.0))
+)
+
+
+def _print_state() -> None:
+    frame = animation.current_frame
+    print(f"{frame=}\n{camera=}\n{light=}")
+
+
+animation.events.connect(_print_state)
+animation.track_removed.connect(_print_state)
+animation.keyframes_added.connect(_print_state)
+animation.keyframes_removed.connect(_print_state)
+animation.keyframes_moved.connect(_print_state)
+animation.easing_changed.connect(_print_state)
+
+
+def spawn_widget():
+    """Spawn the timeline widget."""
     app = QApplication(sys.argv)
-
-    camera = Camera()
-
-    light = Light()
-
-    animation = AnimationTimeline(
-        track_options={
-            "cam_x": (camera, "x"),
-            "cam_y": (camera, "y"),
-            "cam_zoom": (camera, "zoom"),
-            # note that light is a whole model itself!
-            "light": (light, ""),
-        }
-    )
-
-    cam_x = animation.add_track("cam_x")
-    cam_y = animation.add_track("cam_y")
-    cam_zoom = animation.add_track("cam_zoom")
-    light = animation.add_track("light")
-
-    cam_x.add_keyframe(20, value=50.0)
-    cam_x.add_keyframe(100, value=200.0)
-    cam_x.add_keyframe(200, value=50.0)
-
-    cam_y.add_keyframe(0, value=0.0)
-    cam_y.add_keyframe(150, value=100.0, easing=EasingFunction.Step)
-    cam_y.add_keyframe(300, value=0.0)
-
-    # Camera.zoom
-    cam_zoom.add_keyframe(0, value=1.0)
-    cam_zoom.add_keyframe(100, value=2.5)
-    cam_zoom.add_keyframe(200, value=1.0)
-
-    # Light — whole pydantic model; each field is interpolated independently.
-    light.add_keyframe(
-        0, value=Light(intensity=0.5, angles=Angles(x=0.0, y=0.0, z=0.0))
-    )
-    light.add_keyframe(
-        150,
-        value=Light(intensity=0.2, angles=Angles(x=45.0, y=90.0, z=0.0)),
-        easing=EasingFunction.Step,
-    )
-    light.add_keyframe(
-        300, value=Light(intensity=0.8, angles=Angles(x=10.0, y=20.0, z=30.0))
-    )
-
     # set up the widget
     timeline = AnimationTimelineWidget(animation=animation)
-
-    def _print_state() -> None:
-        frame = timeline.animation.current_frame
-        print(f"{frame=}\n{camera=}\n{light=}")
-
-    timeline.animation.events.connect(_print_state)
-    timeline.animation.track_removed.connect(_print_state)
-    timeline.animation.keyframes_added.connect(_print_state)
-    timeline.animation.keyframes_removed.connect(_print_state)
-    timeline.animation.keyframes_moved.connect(_print_state)
-    timeline.animation.easing_changed.connect(_print_state)
 
     timeline.resize(1200, 200)
     timeline.setWindowTitle("AnimationTimelineWidget - demo (Camera + Light)")
     timeline.show()
-
     sys.exit(app.exec())
 
 
 if __name__ == "__main__":
-    main()
+    spawn_widget()
