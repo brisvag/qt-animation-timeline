@@ -23,7 +23,7 @@ from superqt import QSearchableComboBox
 
 from qt_animation_timeline.easing import EasingFunction
 from qt_animation_timeline.models import (
-    Animation,
+    AnimationTimeline,
     Keyframe,
     PlayMode,
     Track,
@@ -123,7 +123,7 @@ class AnimationTimelineWidget(QWidget):
         track_color_cycle: list[QColor] | None = None,
         track_options: dict[str, tuple[Any, str]] | None = None,
         play_fps: int = 30,
-        animation: Animation | None = None,
+        animation: AnimationTimeline | None = None,
         **color_kwargs: QColor,
     ) -> None:
         super().__init__(parent)
@@ -149,11 +149,11 @@ class AnimationTimelineWidget(QWidget):
         )
 
         if animation is None:
-            animation = Animation(
+            animation = AnimationTimeline(
                 track_options=track_options if track_options is not None else {},
                 play_fps=play_fps,
             )
-        self.animation: Animation = animation
+        self.animation: AnimationTimeline = animation
         self.selected_keyframes: list[Keyframe] = []
         self._drag_pivot: Keyframe | None = None
         self._drag_offset: int = 0

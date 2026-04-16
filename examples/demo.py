@@ -14,8 +14,8 @@ import sys
 from psygnal import EventedModel
 from qtpy.QtWidgets import QApplication
 
+from qt_animation_timeline import AnimationTimeline, AnimationTimelineWidget
 from qt_animation_timeline.easing import EasingFunction
-from qt_animation_timeline.qt_timeline import AnimationTimelineWidget
 
 
 class Camera:
@@ -52,7 +52,7 @@ def main() -> None:
 
     light = Light()
 
-    timeline = AnimationTimelineWidget(
+    animation = AnimationTimeline(
         track_options={
             "cam_x": (camera, "x"),
             "cam_y": (camera, "y"),
@@ -62,10 +62,10 @@ def main() -> None:
         }
     )
 
-    cam_x = timeline.add_track("cam_x")
-    cam_y = timeline.add_track("cam_y")
-    cam_zoom = timeline.add_track("cam_zoom")
-    light = timeline.add_track("light")
+    cam_x = animation.add_track("cam_x")
+    cam_y = animation.add_track("cam_y")
+    cam_zoom = animation.add_track("cam_zoom")
+    light = animation.add_track("light")
 
     cam_x.add_keyframe(20, value=50.0)
     cam_x.add_keyframe(100, value=200.0)
@@ -92,6 +92,9 @@ def main() -> None:
     light.add_keyframe(
         300, value=Light(intensity=0.8, angles=Angles(x=10.0, y=20.0, z=30.0))
     )
+
+    # set up the widget
+    timeline = AnimationTimelineWidget(animation=animation)
 
     def _print_state() -> None:
         frame = timeline.animation.current_frame

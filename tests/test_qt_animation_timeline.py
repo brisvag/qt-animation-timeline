@@ -12,7 +12,7 @@ from qtpy.QtWidgets import QApplication
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from qt_animation_timeline.easing import EasingFunction, _coerce_value
-from qt_animation_timeline.models import Animation, PlayMode
+from qt_animation_timeline.models import AnimationTimeline, PlayMode
 from qt_animation_timeline.qt_timeline import (
     _BUTTON_ICONS,
     _DEFAULT_COLORS,
@@ -408,7 +408,7 @@ def test_arrow_keys(timeline):
 
 
 def test_play_modes(timeline):
-    state = Animation()
+    state = AnimationTimeline()
     assert state.play_mode == PlayMode.NORMAL
     state.cycle_play_mode()
     assert state.play_mode == PlayMode.LOOP
@@ -619,7 +619,7 @@ def test_model_field_interpolation(timeline):
             self.pos = Pose(0.0, 0.0, "start")
 
     obj = Obj()
-    state = Animation(track_options={"pos": (obj, "pos")})
+    state = AnimationTimeline(track_options={"pos": (obj, "pos")})
     track = state.add_track("pos")
     track.add_keyframe(0, Pose(0.0, 0.0, "start"))
     track.add_keyframe(100, Pose(10.0, 20.0, "end"))

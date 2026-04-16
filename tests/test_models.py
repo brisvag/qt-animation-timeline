@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 from qt_animation_timeline.easing import EasingFunction
 from qt_animation_timeline.models import (
-    Animation,
+    AnimationTimeline,
     Keyframe,
     PlayMode,
     Track,
@@ -12,7 +12,7 @@ from qt_animation_timeline.models import (
 
 @pytest.fixture(scope="function")
 def animation():
-    animation = Animation()
+    animation = AnimationTimeline()
 
     class MyModel(BaseModel):
         x: int = 1

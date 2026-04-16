@@ -221,7 +221,7 @@ class Track(BaseModel):
         return kf
 
 
-class Animation(EventedModel):
+class AnimationTimeline(EventedModel):
     """Runtime state of an animation timeline."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
