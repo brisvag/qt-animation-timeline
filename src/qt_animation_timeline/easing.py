@@ -8,11 +8,15 @@ from collections.abc import Iterable
 from enum import Enum
 from math import cos, pi, pow, sin, sqrt
 from types import NoneType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from pydantic_core import core_schema
 
 tau = pi * 2
+
+if TYPE_CHECKING:
+    from pydantic import GetCoreSchemaHandler
 
 
 logger = logging.getLogger(__name__)
@@ -378,3 +382,23 @@ class EasingFunction(Enum):
                 self.name,
             )
             return EasingFunction.Step.value[0](p, v1, v2)
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source, handler: GetCoreSchemaHandler):
+        """Serialize with name, not value (function)."""
+        schema = handler(source)
+
+        return core_schema.no_info_after_validator_function(
+            cls,
+            schema,
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                lambda v: v.name
+            ),
+        )
+
+    @classmethod
+    def _missing_(cls, value):
+        # needed to cast back to enum if the name is passed
+        if isinstance(value, str):
+            return cls[value]
+        return None

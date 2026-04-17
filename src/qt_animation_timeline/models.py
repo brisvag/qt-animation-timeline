@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 
 from psygnal import Signal
 from psygnal._evented_model import EventedModel
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from qt_animation_timeline.easing import EasingFunction, _is_collection
 
@@ -467,3 +467,12 @@ class AnimationTimeline(EventedModel):
 
             self.current_frame = frame
             yield self.current_frame
+
+    @field_serializer("track_options")
+    def _serialize_track_options(self, value: dict[str, tuple[Any, str]]):
+        # ensure that the objects are serialized as their classes, so this can be reused
+        # with new objects
+        return {
+            name: (f"{obj.__class__.__module__}.{obj.__class__.__qualname__}", attr)
+            for name, (obj, attr) in value.items()
+        }
