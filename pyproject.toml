@@ -42,7 +42,6 @@ dependencies = [
     "psygnal",
     "pydantic>2",
     "pydantic-extra-types",
-    "pyqt6",
 ]
 
 # https://peps.python.org/pep-0621/#dependencies-optional-dependencies
@@ -66,7 +65,7 @@ repository = "https://github.com/brisvag/qt-animation-editor/qt-animation-editor
 # https://peps.python.org/pep-0735/
 # setup with `uv sync` or `pip install -e . --group dev`
 [dependency-groups]
-test = ["pytest", "pytest-cov", "numpy"]
+test = ["pytest", "pytest-cov", "numpy", "pyqt6"]
 dev = [
     { include-group = "test" },
     "ipython",
