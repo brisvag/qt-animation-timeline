@@ -1,10 +1,10 @@
 # qt-animation-timeline
 
-[![License](https://img.shields.io/pypi/l/qt-animation-timeline.svg?color=green)](https://github.com/brisvag/qt-animation-editor/qt-animation-editor/raw/main/LICENSE)
+[![License](https://img.shields.io/pypi/l/qt-animation-timeline.svg?color=green)](https://github.com/brisvag/qt-animation-timeline/qt-animation-timeline/raw/main/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/qt-animation-timeline.svg?color=green)](https://pypi.org/project/qt-animation-timeline)
 [![Python Version](https://img.shields.io/pypi/pyversions/qt-animation-timeline.svg?color=green)](https://python.org)
-[![CI](https://github.com/brisvag/qt-animation-editor/qt-animation-editor/actions/workflows/ci.yml/badge.svg)](https://github.com/brisvag/qt-animation-editor/qt-animation-editor/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/brisvag/qt-animation-editor/qt-animation-editor/branch/main/graph/badge.svg)](https://codecov.io/gh/brisvag/qt-animation-editor/qt-animation-editor)
+[![CI](https://github.com/brisvag/qt-animation-timeline/qt-animation-timeline/actions/workflows/ci.yml/badge.svg)](https://github.com/brisvag/qt-animation-timeline/qt-animation-timeline/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/brisvag/qt-animation-timeline/qt-animation-timeline/branch/main/graph/badge.svg)](https://codecov.io/gh/brisvag/qt-animation-timeline/qt-animation-timeline)
 
 A blender-style timeline widget for qt to edit animations.
 
@@ -87,10 +87,10 @@ The easiest way to get started is to use the [github cli](https://cli.github.com
 and [uv](https://docs.astral.sh/uv/getting-started/installation/):
 
 ```sh
-gh repo fork brisvag/qt-animation-editor/qt-animation-editor --clone
+gh repo fork brisvag/qt-animation-timeline --clone
 # or just
-# gh repo clone brisvag/qt-animation-editor/qt-animation-editor
-cd qt-animation-editor
+# gh repo clone brisvag/qt-animation-timeline
+cd qt-animation-timeline
 uv sync
 ```
 

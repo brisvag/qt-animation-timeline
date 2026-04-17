@@ -51,8 +51,8 @@ dependencies = [
 # name = ["dependency"]
 
 [project.urls]
-homepage = "https://github.com/brisvag/qt-animation-editor"
-repository = "https://github.com/brisvag/qt-animation-editor"
+homepage = "https://github.com/brisvag/qt-animation-timeline"
+repository = "https://github.com/brisvag/qt-animation-timeline"
 
 # Entry points
 # https://peps.python.org/pep-0621/#entry-points

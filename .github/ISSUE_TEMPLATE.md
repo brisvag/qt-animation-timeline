@@ -1,4 +1,4 @@
-* qt-animation-editor version:
+* qt-animation-timeline version:
 * Python version:
 * Operating System:
 
