@@ -3,7 +3,7 @@ _commit: v1
 _src_path: gh:pydev-guide/pyrepo-copier
 author_email: brisvag@gmail.com
 author_name: Lorenzo Gaifas
-github_username: brisvag/qt-animation-editor
+github_username: brisvag/qt-animation-timeline
 mode: tooling
 module_name: qt_animation_timeline
 project_name: qt-animation-timeline
