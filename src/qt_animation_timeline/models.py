@@ -167,7 +167,7 @@ class Track(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
 
     name: str
-    keyframes: list = Field(default_factory=list)
+    keyframes: list[Keyframe] = Field(default_factory=list)
 
     def add_keyframe(
         self,
