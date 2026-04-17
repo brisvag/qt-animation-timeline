@@ -73,7 +73,7 @@ circleset = CircleSet()
 
 track_options = {
     'circle 1': (circleset, 'circle1'),
-    'circle 2': (circleset, 'circle2')
+    'circle 2 size': (circleset, 'circle2.size')  # or (circleset.circle2, size)
 }
 timeline = AnimationTimelineWidget(track_options=track_options)
 timeline.show()

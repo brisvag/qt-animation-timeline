@@ -820,7 +820,7 @@ class AnimationTimelineWidget(QWidget):
         For ``str`` and ``bool`` fields only ``Step`` is offered since linear
         interpolation of those types produces invalid intermediates.
         """
-        model, field = self.animation.track_options.get(track.name)
+        model, field = self.animation.get_track_model_and_attr(track.name)
         try:
             value = getattr(model, field)
         except AttributeError:

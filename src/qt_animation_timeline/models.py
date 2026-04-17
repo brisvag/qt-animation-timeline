@@ -225,6 +225,14 @@ class Track(BaseModel):
         return kf
 
 
+def _resolve_attr_path(source: Any, path: str) -> tuple[Any, str]:
+    while True:
+        attr, _, path = path.partition(".")
+        if not path:
+            return source, attr
+        source = getattr(source, attr)
+
+
 class AnimationTimeline(EventedModel):
     """Runtime state of an animation timeline."""
 
@@ -252,6 +260,10 @@ class AnimationTimeline(EventedModel):
     ) -> None:
         super().__init__(**data)
         self.events.current_frame.connect(self._update_bound_models)
+
+    def get_track_model_and_attr(self, track_name):
+        obj, path = self.track_options[track_name]
+        return _resolve_attr_path(obj, path)
 
     def add_track(self, name: str) -> Track:
         """Add a new track."""
@@ -309,7 +321,7 @@ class AnimationTimeline(EventedModel):
         """Add a keyframe at frame t with value from the current state."""
         if track_name not in self.tracks:
             self.add_track(track_name)
-        model, attr = self.track_options[track_name]
+        model, attr = self.get_track_model_and_attr(track_name)
         value = model if attr == "" else getattr(model, attr)
 
         return self.add_keyframe(track_name, t, value, easing)
@@ -419,7 +431,7 @@ class AnimationTimeline(EventedModel):
             if value is _UNSET:
                 continue
 
-            model, field = self.track_options[name]
+            model, field = self.get_track_model_and_attr(name)
             if field == "":
                 # whole model should be updated
                 if not _is_model_or_dataclass(model):
