@@ -78,22 +78,18 @@ def _is_model_or_dataclass(obj: Any) -> bool:
 
 
 def _is_frozen_field(obj: Any, field: str) -> bool:
-    if dataclasses.is_dataclass(obj) and obj.__dataclass_params__.frozen:
-        return True
+    if dataclasses.is_dataclass(obj):
+        return obj.__dataclass_params__.frozen
+
     if hasattr(obj, "model_config") and obj.model_config.get("frozen", False):
         return True
-    if (
-        hasattr(obj, "model_fields")
-        and field in obj.model_fields
-        and obj.model_fields[field].frozen
-    ):
+    elif hasattr(obj, "__config__") and not obj.__config__.allow_mutation:
         return True
-    if (
-        hasattr(obj, "__fields__")
-        and field in obj.__fields__
-        and not obj.__fields__[field].field_info.allow_mutation
-    ):
-        return True
+
+    if hasattr(obj, "model_fields") and field in obj.model_fields:
+        return obj.model_fields[field].frozen
+    elif hasattr(obj, "__fields__") and field in obj.__fields__:
+        return not obj.__fields__[field].field_info.allow_mutation
     return False
 
 
