@@ -280,9 +280,14 @@ def _coerce_value(reference: Any, interpolated: Any) -> Any:
         }
     if _is_collection(reference):
         # cast each element back recursively (handles nested)
-        return type(reference)(
-            [_coerce_value(r, v) for r, v in zip(reference, interpolated, strict=True)]
-        )
+        val = [
+            _coerce_value(r, v) for r, v in zip(reference, interpolated, strict=True)
+        ]
+        if isinstance(reference, tuple) and hasattr(reference, "_fields"):
+            # special case for namedtuple (which is not a class, ugh...)
+            # that take individual arguments, not a collection
+            return type(reference)(*val)
+        return type(reference)(val)
     return interpolated
 
 

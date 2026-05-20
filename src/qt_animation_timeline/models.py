@@ -82,8 +82,28 @@ def _is_frozen_field(obj: Any, field: str) -> bool:
         return True
     if hasattr(obj, "model_config") and obj.model_config.get("frozen", False):
         return True
-    if hasattr(obj, "model_fields") and obj.model_fields[field].frozen:
+    if (
+        hasattr(obj, "model_fields")
+        and field in obj.model_fields
+        and obj.model_fields[field].frozen
+    ):
         return True
+    if (
+        hasattr(obj, "__fields__")
+        and field in obj.__fields__
+        and not obj.__fields__[field].field_info.allow_mutation
+    ):
+        return True
+    return False
+
+
+def _is_field(obj: Any, field: str) -> bool:
+    if dataclasses.is_dataclass(obj):
+        return field in obj.__dataclass_fields__
+    if hasattr(obj, "model_fields"):
+        return field in obj.model_fields
+    if hasattr(obj, "__fields__"):
+        return field in obj.__fields__
     return False
 
 
@@ -117,25 +137,27 @@ def _update_model_inplace(target: Any, data: dict) -> None:
         if current is missing:
             raise KeyError(f'Field "{current}" is missing from {target}.')
 
-        try:
-            if _is_frozen_field(target, key):
-                # frozen fields cannot be handled by update method,
-                # so just attempt to update inplace directly and remove
-                # from the dict
-                # TODO: this can be simplified if we handle frozen fields
-                #       better in napari within update()
-                new_val = data_copy.pop(key)
+        if (
+            update_method is None
+            or not _is_field(target, key)
+            or _is_frozen_field(target, key)
+        ):
+            new_val = data_copy.pop(key)
+            try:
                 if _is_model_or_dataclass(current):
                     _update_model_inplace(current, new_val)
                 elif _is_model_container(current):
                     _update_container_models(current, new_val)
-                # if it's neither a model nor a container of models, leave it alone
-            elif update_method is None:
-                new_val = data_copy.pop(key)
-                setattr(target, key, new_val)
-        except (AttributeError, TypeError) as e:
-            warnings.warn(f"setting values to {target} failed:\n{e}", stacklevel=2)
-            pass
+                elif _is_frozen_field(target, key):
+                    # if the above didn't work, leave frozen fields alone
+                    pass
+                else:
+                    # anything else, try basic setattr
+                    setattr(target, key, new_val)
+            except (AttributeError, TypeError, ValueError) as e:
+                warnings.warn(f"setting values to {target} failed:\n{e}", stacklevel=2)
+                pass
+        # evertyhgin else will pass through and be updated via the update method below
 
     if update_method is not None:
         update_method(data_copy)
