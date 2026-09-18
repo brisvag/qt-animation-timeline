@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from enum import Enum
 from math import cos, pi, pow, sin, sqrt
 from types import NoneType
@@ -268,9 +268,9 @@ def _coerce_value(reference: Any, interpolated: Any) -> Any:
         # need to do before int or they will be converted to int
         return interpolated
     if isinstance(reference, int):
-        # back from float
+        # back from potential float
         return round(interpolated)
-    if isinstance(reference, dict):
+    if isinstance(reference, Mapping):
         # assume at this point dicts have the same set of keys
         return {
             k: _coerce_value(vref, vint)
@@ -351,7 +351,7 @@ class EasingFunction(Enum):
             return EasingFunction.Step.value[0](p, v1, v2)
 
         reference = v1
-        if isinstance(v1, dict) and isinstance(v2, dict):
+        if isinstance(v1, Mapping) and isinstance(v2, Mapping):
             if not v1.keys() == v2.keys():
                 raise ValueError("Cannot interpolate between dicts with different keys")
             interp = {k: self(p, v1[k], v2[k]) for k in v1}

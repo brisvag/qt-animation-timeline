@@ -6,6 +6,7 @@ import dataclasses
 import itertools
 import logging
 import warnings
+from collections.abc import Mapping
 from enum import Enum
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 
@@ -31,7 +32,7 @@ _UNSET = object()
 
 
 def _nested_to_dict(obj):
-    if isinstance(obj, dict):
+    if isinstance(obj, Mapping):
         return {k: _nested_to_dict(v) for k, v in obj.items()}
     elif _is_model_container(obj):
         return [_nested_to_dict(el) for el in obj]
@@ -41,7 +42,7 @@ def _nested_to_dict(obj):
 def _to_dict(obj: Any) -> dict[str, Any]:
     d = None
     # must make a copy to not change the original value
-    if isinstance(obj, dict):
+    if isinstance(obj, Mapping):
         d = dict(obj)
     elif hasattr(obj, "model_dump"):
         d = obj.model_dump()
