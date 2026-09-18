@@ -312,7 +312,7 @@ class AnimationTimeline(EventedModel):
             return
 
         self.track_options[new_name] = self.track_options.pop(name)
-        track = self.tracks.pop(name)
+        track = self.tracks.pop(name, None)
         if track is not None:
             track.name = new_name
             self.tracks[new_name] = track
