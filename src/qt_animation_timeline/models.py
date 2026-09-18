@@ -87,8 +87,8 @@ def _is_frozen_field(obj: Any, field: str) -> bool:
     elif hasattr(obj, "__config__") and not obj.__config__.allow_mutation:
         return True
 
-    if hasattr(obj, "model_fields") and field in obj.model_fields:
-        return obj.model_fields[field].frozen
+    if hasattr(obj.__class__, "model_fields") and field in obj.__class__.model_fields:
+        return obj.__class__.model_fields[field].frozen
     elif hasattr(obj, "__fields__") and field in obj.__fields__:
         return not obj.__fields__[field].field_info.allow_mutation
     return False
@@ -97,8 +97,8 @@ def _is_frozen_field(obj: Any, field: str) -> bool:
 def _is_field(obj: Any, field: str) -> bool:
     if dataclasses.is_dataclass(obj):
         return field in obj.__dataclass_fields__
-    if hasattr(obj, "model_fields"):
-        return field in obj.model_fields
+    if hasattr(obj.__class__, "model_fields"):
+        return field in obj.__class__.model_fields
     if hasattr(obj, "__fields__"):
         return field in obj.__fields__
     return False
