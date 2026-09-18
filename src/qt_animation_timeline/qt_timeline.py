@@ -618,7 +618,7 @@ class AnimationTimelineWidget(QWidget):
         else:
             self.toggle_playback()
 
-    def _handle_label_click(self, x: int, y: int, global_pos: object) -> None:
+    def _handle_label_click(self, x: int, y: int, global_pos: QPoint) -> None:
         """Handle a left-click inside the label column (remove / add buttons)."""
         for i, track in enumerate(self.animation.tracks.values()):
             ty = self.top_margin + i * self.track_height - self.scroll_y
@@ -844,7 +844,7 @@ class AnimationTimelineWidget(QWidget):
         cy = self.track_center_y(track_index)
         return abs(y - cy) <= self.line_thickness + 4
 
-    def _show_easing_menu(self, x: int, y: int, global_pos: object) -> None:
+    def _show_easing_menu(self, x: int, y: int, global_pos: QPoint) -> None:
         """Show easing options for the segment under the cursor.
 
         Only opens when the click lands on a keyframe diamond or within
@@ -867,16 +867,16 @@ class AnimationTimelineWidget(QWidget):
 
         allowed = self._get_allowed_easings_for_track(track)
         for ef in allowed:
-            action = menu.addAction(ef.name)
-            action.setCheckable(True)
-            action.setChecked(all(k.easing is ef for k in targets))
+            if action := menu.addAction(ef.name):
+                action.setCheckable(True)
+                action.setChecked(all(k.easing is ef for k in targets))
 
-            def _set(checked: bool, _ef: EasingFunction = ef) -> None:
-                for k in targets:
-                    k.easing = _ef
-                self.animation.easing_changed(list(targets))
+                def _set(checked: bool, _ef: EasingFunction = ef) -> None:
+                    for k in targets:
+                        k.easing = _ef
+                    self.animation.easing_changed(list(targets))
 
-            action.triggered.connect(_set)
+                action.triggered.connect(_set)
 
         menu.exec(global_pos)
 
@@ -892,7 +892,7 @@ class AnimationTimelineWidget(QWidget):
             (opt, opt not in used_by_others) for opt in self.animation.track_options
         ]
 
-    def _show_track_change_menu(self, y: int, global_pos: object) -> None:
+    def _show_track_change_menu(self, y: int, global_pos: QPoint) -> None:
         """Show a searchable combo-box for changing a track's binding.
 
         Options already used by other tracks are disabled to enforce uniqueness.
@@ -915,9 +915,10 @@ class AnimationTimelineWidget(QWidget):
         for option, enabled in options:
             combo.addItem(option)
             if not enabled:
-                item = combo.model().item(combo.model().rowCount() - 1)
-                if item is not None:
-                    item.setEnabled(False)
+                if (model := combo.model()) is not None:
+                    item = model.item(model.rowCount() - 1)
+                    if item is not None:
+                        item.setEnabled(False)
 
         try:
             current_names = [opt for opt, _ in options]
@@ -932,9 +933,10 @@ class AnimationTimelineWidget(QWidget):
         container.show()
 
         def _apply(idx: int) -> None:
-            model_item = combo.model().item(idx)
-            if model_item is not None and not model_item.isEnabled():
-                return
+            if model := combo.model():
+                model_item = model.item(idx)
+                if model_item is not None and not model_item.isEnabled():
+                    return
             new_name = combo.itemText(idx)
             if new_name != track.name:
                 self.animation.remove_track(track.name)
@@ -943,7 +945,7 @@ class AnimationTimelineWidget(QWidget):
 
         combo.activated.connect(_apply)
 
-    def _show_add_track_popup(self, global_pos: object) -> None:
+    def _show_add_track_popup(self, global_pos: QPoint) -> None:
         """Show a searchable combo-box to pick which track to add.
 
         Only available (unused) track options are shown.  The user can either
@@ -994,9 +996,11 @@ class AnimationTimelineWidget(QWidget):
         )
         return max(0, new_scroll_x)
 
-    def wheelEvent(self, event: QWheelEvent) -> None:
-        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            steps = event.angleDelta().y() / 120
+    def wheelEvent(self, a0: QWheelEvent | None) -> None:
+        if a0 is None:
+            return
+        if a0.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            steps = a0.angleDelta().y() / 120
             factor = _ZOOM_FACTOR**steps
             old_fw = self.frame_width
             new_fw = max(
@@ -1006,7 +1010,7 @@ class AnimationTimelineWidget(QWidget):
             if new_fw == old_fw:
                 return
             self.frame_width = new_fw
-            self.scroll_x = self._scroll_x_for_zoom(event.x(), old_fw, new_fw)
+            self.scroll_x = self._scroll_x_for_zoom(a0.x(), old_fw, new_fw)
             self.update_scrollbars()
             self.h_scroll.blockSignals(True)
             self.h_scroll.setValue(self.scroll_x)
@@ -1014,21 +1018,23 @@ class AnimationTimelineWidget(QWidget):
             self.update()
             return
 
-        self.scroll_x -= event.angleDelta().y()
+        self.scroll_x -= a0.angleDelta().y()
         self.scroll_x = max(0, min(self.scroll_x, self.h_scroll.maximum()))
         self.h_scroll.setValue(self.scroll_x)
         self.update()
 
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Delete:
+    def keyPressEvent(self, a0: QKeyEvent | None) -> None:
+        if a0 is None:
+            return
+        if a0.key() == Qt.Key.Key_Delete:
             removed = list(self.selected_keyframes)
             self.animation.remove_keyframes(removed)
             self.selected_keyframes.clear()
-        elif event.key() == Qt.Key.Key_Space:
+        elif a0.key() == Qt.Key.Key_Space:
             self.toggle_playback()
-        elif event.key() == Qt.Key.Key_Left:
+        elif a0.key() == Qt.Key.Key_Left:
             self._set_playhead(max(0, self.animation.current_frame - 1))
-        elif event.key() == Qt.Key.Key_Right:
+        elif a0.key() == Qt.Key.Key_Right:
             self._set_playhead(self.animation.current_frame + 1)
 
     def toggle_playback(self) -> None:
@@ -1047,6 +1053,8 @@ class AnimationTimelineWidget(QWidget):
     def _on_timer_tick(self) -> None:
         if self._frame_iterator is None:
             self.toggle_playback()
+        if self._frame_iterator is None:
+            raise RuntimeError
         try:
             next(self._frame_iterator)
         except StopIteration:

@@ -156,3 +156,9 @@ ignore = [
 # https://github.com/crate-ci/typos/blob/master/docs/reference.md
 [tool.typos.default]
 extend-ignore-identifiers-re = []
+
+[tool.pyrefly]
+project-includes = [
+    "**/*.py*",
+    "**/*.ipynb",
+]

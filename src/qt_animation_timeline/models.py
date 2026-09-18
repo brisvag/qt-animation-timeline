@@ -8,7 +8,7 @@ import logging
 import warnings
 from collections.abc import Mapping
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, cast
 
 from psygnal import Signal
 from psygnal._evented_model import EventedModel
@@ -111,17 +111,17 @@ def _is_model_container(obj: Any) -> bool:
 
 
 def _update_container_models(obj: Iterable, data: Iterable):
-    try:
-        for el_old, el_new in zip(obj, data, strict=True):
+    for el_old, el_new in zip(obj, data, strict=True):
+        try:
             _update_model_inplace(el_old, el_new)
-    except ValueError as e:
-        if e.args and "zip() argument" in e.args[0]:
-            # different number of elements. Just give up.
-            logger.info(
-                "%s and %s have different lengths. Cannot update.", el_old, el_new
-            )
-        else:
-            raise e
+        except ValueError as e:
+            if e.args and "zip() argument" in e.args[0]:
+                # different number of elements. Just give up.
+                logger.info(
+                    "%s and %s have different lengths. Cannot update.", el_old, el_new
+                )
+            else:
+                raise e
 
 
 def _update_model_inplace(target: Any, data: dict) -> None:
@@ -144,6 +144,7 @@ def _update_model_inplace(target: Any, data: dict) -> None:
                 if _is_model_or_dataclass(current):
                     _update_model_inplace(current, new_val)
                 elif _is_model_container(current):
+                    current = cast("Iterable", current)
                     _update_container_models(current, new_val)
                 elif _is_frozen_field(target, key):
                     # if the above didn't work, leave frozen fields alone
