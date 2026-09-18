@@ -1118,3 +1118,10 @@ class AnimationTimelineWidget(QWidget):
                 else (180, 180, 180)
             )
         return self.animation.add_track(name)
+
+    def save_animation(self, filename):
+        self.animation.save_animation(filename)
+
+    def load_animation(self, filename):
+        self.animation.load_animation(filename)
+        self._update_geometry()

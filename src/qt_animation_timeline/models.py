@@ -8,6 +8,7 @@ import logging
 import warnings
 from collections.abc import Mapping
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, cast
 
 from psygnal import Signal
@@ -508,3 +509,15 @@ class AnimationTimeline(EventedModel):
             name: (f"{obj.__class__.__module__}.{obj.__class__.__qualname__}", attr)
             for name, (obj, attr) in value.items()
         }
+
+    def save_animation(self, filename):
+        dump = self.model_dump_json(indent=4)
+        path = Path(filename)
+        with open(path, "w") as f:
+            f.write(dump)
+
+    def load_animation(self, filename):
+        with open(filename) as f:
+            validated = self.model_validate_json(f.read())
+        for k, v in validated.model_dump().items():
+            setattr(self, k, v)
